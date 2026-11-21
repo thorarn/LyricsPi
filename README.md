@@ -142,7 +142,8 @@ Speichere die Dateien in UTF-8. Eine UTF-8-BOM am Dateianfang wird toleriert.
 Zeilenumbrüche, Leerzeilen, Einrückungen und nachgestellte Leerzeichen
 bleiben erhalten.
 
-Verwende das Namensschema `Nummer_Songname.txt`, etwa `02_Abend.txt`.
+Verwende `Nummer_Songname.txt` oder `Nummer - Songname.txt`, etwa
+`02_Abend.txt` oder `002 - Abend.txt`.
 `2_Abend.txt` steht vor `10_Morgen.txt`. Führende Nullen ändern die Nummer
 nicht. Bei gleicher Nummer gilt die Reihenfolge der vollständigen Dateinamen.
 Unterordner und symbolische Links werden übersprungen.

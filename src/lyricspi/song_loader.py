@@ -16,7 +16,7 @@ from .setlist import Setlist, Song
 
 
 LOGGER = logging.getLogger(__name__)
-SONG_STEM = re.compile(r"([0-9]+)_(.+)", re.DOTALL)
+SONG_STEM = re.compile(r"([0-9]+)(?:_| +- +)(.+)", re.DOTALL)
 DRIVE_REMOVABLE = 2
 ERROR_NOT_READY = 21
 

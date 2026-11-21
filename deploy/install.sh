@@ -57,7 +57,7 @@ system_packages() {
     printf '%s\n' python3 python3-venv python3-pygame python3-setuptools \
         python3-wheel fontconfig "$font_package" kbd polkitd exfatprogs \
         util-linux mount udev \
-        libgbm1 libegl1 libegl-mesa0 libgl1-mesa-dri
+        libdrm2 libgbm1 libegl1 libegl-mesa0 libgles2 libgl1-mesa-dri
 }
 
 missing_packages() {
@@ -72,7 +72,7 @@ missing_packages() {
 deployment_matches() {
     local current=$1 staged=$2 target path
     shift 2
-    for path in src assets demo_songs deploy/usb_mount.py config/config.example.json config/config.json README.md pyproject.toml; do
+    for path in src assets demo_songs deploy/usb_mount.py tools/graphics_diagnostic.py config/config.example.json config/config.json README.md pyproject.toml; do
         diff -qr --exclude=__pycache__ --exclude='*.egg-info' \
             "$current/$path" "$staged/app/$path" >/dev/null 2>&1 || return 1
     done
@@ -192,7 +192,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-install -d -m 0755 "$stage/app" "$stage/app/config" "$stage/app/assets" "$stage/app/deploy"
+install -d -m 0755 "$stage/app" "$stage/app/config" "$stage/app/assets" "$stage/app/deploy" "$stage/app/tools"
 cp -R -- "$source_dir"/{src,demo_songs} "$stage/app/"
 if [[ -d "$source_dir/assets" ]]; then
     cp -R -- "$source_dir/assets/." "$stage/app/assets/"
@@ -200,6 +200,7 @@ fi
 install -m 0644 "$source_dir/pyproject.toml" "$source_dir/README.md" "$stage/app/"
 install -m 0644 "$source_dir/config/config.example.json" "$stage/app/config/"
 install -m 0644 "$source_dir/deploy/usb_mount.py" "$stage/app/deploy/"
+install -m 0644 "$source_dir/tools/graphics_diagnostic.py" "$stage/app/tools/"
 local_config="$prefix/config/config.json"
 if [[ -f "$local_config" ]]; then
     install -o root -g lyricspi -m 0640 "$local_config" "$stage/app/config/config.json"
@@ -269,7 +270,12 @@ drivers = [
 ]
 if "kmsdrm" not in drivers:
     raise SystemExit(f"Die installierte SDL2-Bibliothek unterstützt kein KMSDRM: {drivers}")
-print(f"Pygame {pygame.version.ver}, SDL {pygame.get_sdl_version()}, KMSDRM verfügbar.")
+for soname in ("libEGL.so.1", "libEGL_mesa.so.0", "libGLESv2.so.2", "libgbm.so.1", "libdrm.so.2"):
+    try:
+        ctypes.CDLL(soname)
+    except OSError as error:
+        raise SystemExit(f"KMSDRM-Systembibliothek nicht ladbar: {soname}: {error}") from error
+print(f"Pygame {pygame.version.ver}, SDL {pygame.get_sdl_version()}, KMSDRM- und EGL-Bibliotheken vorhanden.")
 PY
 }
 

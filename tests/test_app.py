@@ -454,3 +454,41 @@ def test_missing_display_cleans_up(
         run(Config())
     assert not pygame.display.get_init()
     assert not pygame.font.get_init()
+
+
+def test_kmsdrm_egl_failure_preserves_cause_and_explains_diagnosis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lyricspi import renderer as renderer_module
+
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setenv("SDL_KMSDRM_DEVICE_INDEX", "1")
+    monkeypatch.setattr(renderer_module, "platform", "linux")
+    monkeypatch.setattr(pygame.display, "get_driver", lambda: "KMSDRM")
+    monkeypatch.setattr(pygame.display, "get_desktop_sizes", lambda: [(1920, 1080)])
+    failure = pygame.error("EGL not initialized")
+    set_mode = Mock(side_effect=failure)
+    monkeypatch.setattr(pygame.display, "set_mode", set_mode)
+
+    with pytest.raises(RuntimeError, match=r"KMSDRM.*1920.*EGL not initialized.*graphics_diagnostic") as raised:
+        run(Config(display=DisplayConfig(fullscreen=True)))
+
+    assert raised.value.__cause__ is failure
+    set_mode.assert_called_once_with((1920, 1080), pygame.FULLSCREEN)
+    assert not pygame.display.get_init()
+
+
+def test_windows_windowed_mode_retains_configured_size_and_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lyricspi import renderer as renderer_module
+
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr(renderer_module, "platform", "win32")
+    set_mode = Mock(wraps=pygame.display.set_mode)
+    monkeypatch.setattr(pygame.display, "set_mode", set_mode)
+    try:
+        Renderer(DisplayConfig(window_width=640, window_height=360), resizable=True)
+        set_mode.assert_called_once_with((640, 360), pygame.RESIZABLE)
+    finally:
+        pygame.quit()

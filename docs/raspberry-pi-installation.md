@@ -78,6 +78,9 @@ System-Python-Version (mindestens 3.11) und verwendet `python3-pygame`
 samt SDL2 aus derselben Distribution. LyricsPi wird offline in eine venv
 mit Zugriff auf diese Systempakete installiert. Die Prüfung zeigt die
 Pygame- und SDL-Version und kontrolliert, ob SDL KMSDRM anbietet.
+Er prüft außerdem, ob die Laufzeitbibliotheken für EGL, GBM, DRM und
+den von SDL verwendeten OpenGL-ES-Pfad geladen werden können. Die
+Anwendung selbst verwendet weiterhin Pygame-Oberflächen.
 Bookworm liefert DejaVu Sans Mono über `fonts-dejavu-core`. Auf Trixie
 kommt sie aus `fonts-dejavu-mono`. Pygame findet die Schrift über
 `fontconfig`. Der Windows-Entwicklungsmodus verwendet
@@ -180,6 +183,105 @@ grep -H . /sys/class/drm/card*-*/status
 sudo fgconsole
 ```
 
+### `EGL not initialized` unter Raspberry Pi OS Lite
+
+Die Standard-Unit verwendet die auf dem Raspberry Pi 3 mit Raspberry Pi
+OS Lite 13 (Trixie) bestätigte EGL-/GLES-Konfiguration.
+
+```ini
+[Service]
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_VIDEO_EGL_DRIVER=libEGL.so.1
+Environment=SDL_VIDEO_GL_DRIVER=libGLESv2.so.2
+```
+
+Die Werte gelten nur für den LyricsPi-Dienst. Bei einer Neuinstallation
+oder beim Aktualisieren mit `sudo bash deploy/install.sh` übernimmt der
+Installer die Unit nach `/etc/systemd/system/lyricspi.service` und führt bei
+einem Update der Unit `systemctl daemon-reload` aus. Danach mit
+`sudo systemctl restart lyricspi.service` starten. Mit
+`systemctl cat lyricspi.service` lassen sich die installierte Unit und
+eventuelle lokale Drop-ins prüfen.
+
+Die Meldung bei `pygame.display.set_mode()` bedeutet, dass der gewählte
+SDL-Treiber den Ausgabemodus nicht öffnen konnte. Eine zuvor erkannte
+Auflösung und ein in SDL gelisteter KMSDRM-Treiber bestätigen weder die
+EGL-/GBM-Initialisierung noch den Zugriff auf den passenden DRM-Master.
+SDL2 initialisiert GBM und EGL beim Erzeugen des KMSDRM-Fensters.
+[SDL2-Quellcode für KMSDRM](https://github.com/libsdl-org/SDL/blob/release-2.32.4/src/video/kmsdrm/SDL_kmsdrmvideo.c)
+
+Den korrigierten Installationsstand übernehmen und den effektiven Dienst
+anzeigen. Der Installer nimmt die Diagnose automatisch mit auf.
+
+```bash
+cd "$HOME/LyricsPi"
+sudo bash deploy/install.sh
+systemctl cat lyricspi.service
+apt-cache policy python3-pygame libsdl2-2.0-0 libsdl2-classic libsdl2-compat \
+  libegl1 libegl-mesa0 libgles2 libgbm1 libdrm2 libgl1-mesa-dri
+```
+
+Für einen Test mit demselben Dienstkonto, den Gruppen `video`, `render`
+und `input` sowie derselben Konsole 7 den normalen Dienst stoppen und einen
+temporären Drop-in unter `/run` anlegen.
+
+```bash
+sudo systemctl stop lyricspi.service
+sudo install -d /run/systemd/system/lyricspi.service.d
+sudoedit /run/systemd/system/lyricspi.service.d/98-lyricspi-graphics-diagnostic.conf
+```
+
+Inhalt des temporären Drop-ins
+
+```ini
+[Service]
+Restart=no
+Environment=EGL_LOG_LEVEL=debug
+ExecStart=
+ExecStart=/opt/lyricspi/.venv/bin/python /opt/lyricspi/tools/graphics_diagnostic.py --seconds 10
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl reset-failed lyricspi.service
+sudo systemctl start lyricspi.service
+sudo journalctl -b -u lyricspi.service -n 150 --no-pager
+```
+
+Das Programm protokolliert SDL-Treiber, Python-/Pygame-Pfad, Paketversionen,
+Grafikumgebung und Bibliotheken. Es prüft die aktive VT, die Geräte unter
+`/dev/dri` einschließlich `card0` und `renderD128` sowie den DRM-Master
+beim kurzzeitigen Öffnen der Karten. Danach versucht es, ein Testbild
+anzuzeigen. Dieser Zugriffstest ist eine Momentaufnahme. Maßgeblich für
+die Abnahme ist das sichtbare Bild am HDMI-Monitor. `EGL_LOG_LEVEL=debug`
+schreibt Mesa-Diagnosen ins Journal. [Mesa-EGL-Dokumentation](https://docs.mesa3d.org/egl.html)
+
+- **Bibliothek fehlt** – Mit `apt-cache policy` Paketquellen und
+  Paketversionen prüfen. Der Installer richtet die benötigten Pakete über APT ein.
+- **Gerät fehlt oder Zugriff verweigert** – DRM-Connectoren und die effektive
+  Dienstkonfiguration prüfen. Die Ausgabe unter dem Dienstkonto zählt.
+- **Gerät lässt sich öffnen, DRM-Master fehlt** – Laufende Grafikprozesse
+  prüfen, etwa mit `sudo fuser -v /dev/dri/card*`, falls `fuser` verfügbar ist.
+  Das Erzwingen eines Starts ohne DRM-Master ermöglicht keine direkte Ausgabe.
+  [SDL2-Dokumentation zum DRM-Master](https://wiki.libsdl.org/SDL2/SDL_HINT_KMSDRM_REQUIRE_DRM_MASTER)
+- **HDMI liegt auf einer anderen Karte** – In der temporären `ExecStart`-Zeile
+  `--card N` ergänzen und den Test wiederholen. `N` ist die Nummer der
+  Karte mit dem tatsächlich verbundenen HDMI-Connector. Eine dauerhafte
+  Kartenauswahl erst übernehmen, wenn genau dieser Test ein HDMI-Bild zeigt.
+
+Nach dem Test nur diesen temporären Drop-in entfernen und wieder zur
+normalen Anwendung wechseln.
+
+```bash
+sudo systemctl stop lyricspi.service
+sudo rm /run/systemd/system/lyricspi.service.d/98-lyricspi-graphics-diagnostic.conf
+sudo systemctl daemon-reload
+sudo systemctl reset-failed lyricspi.service
+sudo systemctl start lyricspi.service
+```
+
+### KMS-Kartenauswahl und schlanke Alternative
+
 Bei fehlender Anzeige zuerst HDMI-Eingang, Kabel und
 `dtoverlay=vc4-kms-v3d` in `/boot/firmware/config.txt` prüfen. Aufschluss
 geben die DRM-Connectoren mit Status `connected` und deren Datei `modes`.
@@ -206,14 +308,17 @@ Bedarf am Monitor deaktiviert werden.
 [Raspberry-Pi-KMS-Diagnose](https://pip.raspberrypi.com/categories/685-app-notes-guides-whitepapers/documents/RP-004341-WP/Troubleshooting-KMS-HDMI-output.pdf) · [SDL-Kartenauswahl](https://wiki.libsdl.org/SDL2/SDL_HINT_KMSDRM_DEVICE_INDEX)
 
 Wenn KMS auf Kernel-Ebene funktioniert, SDL aber kein KMS-Fenster
-erzeugen kann, ist für die Diagnose ein einzelner Xorg-Server mit
-`xinit` eine schlanke Ausweichmöglichkeit. Der normale Installer lässt
-diesen Weg optional. An einer lokalen Textkonsole als Wartungsbenutzer
-anmelden, den Dienst stoppen und Xorg nur bei Bedarf installieren.
+erzeugen kann, ist ein einzelner Xorg-Server mit `xinit` ein
+separater Testpfad. An einer lokalen Textkonsole als Wartungsbenutzer
+anmelden, den Dienst stoppen und Xorg nur bei Bedarf installieren. Erst
+ein sichtbares Testbild auf dem Ziel-Pi qualifiziert diesen Backend
+für eine spätere Umstellung. Der Produktionsdienst verwendet KMSDRM.
 
 ```bash
 sudo systemctl stop lyricspi.service
 sudo apt-get install --no-install-recommends xserver-xorg xinit xserver-xorg-input-libinput
+startx /opt/lyricspi/.venv/bin/python /opt/lyricspi/tools/graphics_diagnostic.py \
+  --driver x11 --seconds 10 -- :0
 cp /opt/lyricspi/config/config.example.json "$HOME/lyricspi-x11.json"
 # In der Kopie display.fullscreen auf true setzen.
 cd /opt/lyricspi

@@ -239,3 +239,34 @@ def test_linux_mount_access_failure_is_reported(
     assert result.issue is SongLoadIssue.SOURCE_UNREADABLE
     assert not result.setlist
     assert "USB-Erkennung fehlgeschlagen" in caplog.text
+@pytest.mark.parametrize("separator", ["_", " - "])
+@pytest.mark.parametrize("prefix", ["1", "01", "001"])
+def test_accepts_number_widths_and_separators(
+    tmp_path: Path, separator: str, prefix: str
+) -> None:
+    name = f"{prefix}{separator}Über den See.TXT"
+    content = "  Grüße\r\n\r\nDie zweite Zeile  "
+    (tmp_path / name).write_bytes(content.encode("utf-8"))
+
+    song = load_songs(tmp_path).setlist.first
+
+    assert song is not None
+    assert (song.number, song.title, song.filename, song.content) == (
+        1, "Über den See", name, content,
+    )
+
+
+def test_sorts_mixed_filename_formats_numerically(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    names = ["10 - Zehn.txt", "2_Zwei.txt", "002 - Auch zwei.txt", "001_Eins.txt"]
+    for name in (*names, "4-Lied.txt", "5 -   .txt"):
+        (tmp_path / name).write_text("Text", encoding="utf-8")
+
+    songs = load_songs(tmp_path).setlist
+
+    assert [song.filename for song in songs] == [
+        names[3], names[2], names[1], names[0],
+    ]
+    assert "Ungültiger Songdateiname: 4-Lied.txt" in caplog.text
+    assert "Ungültiger Songdateiname: 5 -   .txt" in caplog.text

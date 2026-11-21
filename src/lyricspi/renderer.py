@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from sys import platform
 
 import pygame
 
@@ -19,23 +20,31 @@ class Renderer:
     ) -> None:
         pygame.display.init()
         pygame.font.init()
-        LOGGER.info("SDL-Bildschirmtreiber: %s", pygame.display.get_driver())
+        driver = pygame.display.get_driver()
+        LOGGER.info("SDL-Bildschirmtreiber: %s", driver)
         desktop_sizes = pygame.display.get_desktop_sizes()
         if not desktop_sizes or min(desktop_sizes[0]) < 1:
             raise RuntimeError("Kein Bildschirm mit gültiger Auflösung erkannt.")
         LOGGER.info("Bildschirmauflösung: %d × %d", *desktop_sizes[0])
 
+        size = desktop_sizes[0] if config.fullscreen else (
+            config.window_width, config.window_height,
+        )
+        flags = pygame.FULLSCREEN if config.fullscreen else (
+            pygame.RESIZABLE if resizable else 0
+        )
+        try:
+            self.screen = pygame.display.set_mode(size, flags)
+        except pygame.error as error:
+            if platform.startswith("linux") and driver.lower() == "kmsdrm":
+                raise RuntimeError(
+                    f"KMSDRM konnte den Grafikmodus {size[0]} × {size[1]} "
+                    f"nicht öffnen: {error}. Diagnose: tools/graphics_diagnostic.py"
+                ) from error
+            raise
         if config.fullscreen:
-            self.screen = pygame.display.set_mode(
-                desktop_sizes[0], pygame.FULLSCREEN
-            )
             pygame.display.set_allow_screensaver(False)
             pygame.mouse.set_visible(False)
-        else:
-            self.screen = pygame.display.set_mode(
-                (config.window_width, config.window_height),
-                pygame.RESIZABLE if resizable else 0,
-            )
         pygame.display.set_caption("LyricsPi")
         LOGGER.info("Fenster initialisiert: %d × %d", *self.screen.get_size())
 

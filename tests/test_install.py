@@ -101,6 +101,7 @@ def test_armhf_package_profiles(bash: str, release: str, font: str) -> None:
     assert {
         "python3", "python3-pygame", "python3-venv", "python3-setuptools",
         "fontconfig", font,
+        "libdrm2", "libegl1", "libegl-mesa0", "libgbm1", "libgles2",
     } <= packages
     assert {name for name in packages if name.startswith("fonts-")} == {font}
 
@@ -116,29 +117,50 @@ def test_package_check_skips_installed_packages(bash: str) -> None:
     assert result.stdout.splitlines() == ["python3-venv", "python3-pygame"]
 
 
+def test_production_service_sets_kmsdrm_and_egl_libraries() -> None:
+    unit = (ROOT / "deploy" / "lyricspi.service").read_text(encoding="utf-8")
+    service = unit.split("[Service]", 1)[1].split("[Install]", 1)[0]
+    graphics_environment = [
+        line for line in service.splitlines() if line.startswith("Environment=SDL_VIDEO")
+    ]
+    assert graphics_environment == [
+        "Environment=SDL_VIDEODRIVER=kmsdrm",
+        "Environment=SDL_VIDEO_EGL_DRIVER=libEGL.so.1",
+        "Environment=SDL_VIDEO_GL_DRIVER=libGLESv2.so.2",
+    ]
+
+
 def test_identical_deployment_can_be_reused(bash: str, tmp_path: Path) -> None:
     current = tmp_path / "current"
     staged = tmp_path / "staged"
     for directory in (current, staged / "app"):
-        for folder in ("src", "assets", "demo_songs", "config", "deploy"):
+        for folder in ("src", "assets", "demo_songs", "config", "deploy", "tools"):
             (directory / folder).mkdir(parents=True)
         for name in ("README.md", "pyproject.toml", "config/config.example.json", "config/config.json"):
             (directory / name).write_text("same", encoding="utf-8")
         (directory / "deploy" / "usb_mount.py").write_text(
             "same helper", encoding="utf-8"
         )
+        (directory / "tools" / "graphics_diagnostic.py").write_text(
+            "same diagnostic", encoding="utf-8"
+        )
     (current / "src" / "__pycache__").mkdir()
     unit = current / "lyricspi.service"
-    unit.write_text("same unit", encoding="utf-8")
+    unit_text = (ROOT / "deploy" / unit.name).read_text(encoding="utf-8")
+    unit.write_text(unit_text, encoding="utf-8")
     staged_unit = staged / unit.name
-    staged_unit.write_text("same unit", encoding="utf-8")
+    staged_unit.write_text(unit_text, encoding="utf-8")
     args = (current.as_posix(), staged.as_posix(), unit.as_posix())
 
     identical = shell(bash, 'deployment_matches "$@"', *args)
     assert identical.returncode == 0, identical.stderr
-    staged_unit.write_text("changed unit", encoding="utf-8")
+    old_unit = "".join(
+        line for line in unit_text.splitlines(keepends=True)
+        if not line.startswith(("Environment=SDL_VIDEO_EGL_DRIVER=", "Environment=SDL_VIDEO_GL_DRIVER="))
+    )
+    unit.write_text(old_unit, encoding="utf-8")
     assert shell(bash, 'deployment_matches "$@"', *args).returncode == 1
-    staged_unit.write_text("same unit", encoding="utf-8")
+    unit.write_text(unit_text, encoding="utf-8")
     (staged / "app" / "deploy" / "usb_mount.py").write_text(
         "changed helper", encoding="utf-8"
     )

@@ -13,6 +13,8 @@ SupplementaryGroups=video render input
 WorkingDirectory=/opt/lyricspi
 Environment=PATH=/usr/bin:/bin
 Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_VIDEO_EGL_DRIVER=libEGL.so.1
+Environment=SDL_VIDEO_GL_DRIVER=libGLESv2.so.2
 Environment=TERM=linux
 Environment=PYGAME_HIDE_SUPPORT_PROMPT=1
 Environment=PYTHONDONTWRITEBYTECODE=1
