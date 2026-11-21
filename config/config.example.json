@@ -9,7 +9,8 @@
     "font_step": 4,
     "foreground": "#FFFFFF",
     "background": "#000000",
-    "margin_percent": 5
+    "margin_percent": 5,
+    "line_spacing": 4
   },
   "system": {
     "development_mode": true,

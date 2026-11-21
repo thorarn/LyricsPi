@@ -27,6 +27,7 @@ class DisplayConfig:
     foreground: str = "#FFFFFF"
     background: str = "#000000"
     margin_percent: int = 5
+    line_spacing: int = 4
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,8 @@ def _validate_display(display: DisplayConfig) -> None:
             raise ConfigError(f"display.{key} muss das Format #RRGGBB haben.")
     if not 0 <= display.margin_percent < 50:
         raise ConfigError("display.margin_percent muss zwischen 0 und 49 sein.")
+    if display.line_spacing < 0:
+        raise ConfigError("display.line_spacing darf nicht negativ sein.")
 
 
 def _validate_songs(songs: SongsConfig) -> None:

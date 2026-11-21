@@ -1,10 +1,10 @@
 # LyricsPi
 
 LyricsPi ist ein Offline-Songtext-Prompter für Live-Auftritte auf dem
-Raspberry Pi 3. Der Windows-Simulator (M1) zeigt einen festen Beispieltext
-in einem Pygame-Fenster. Der Text ist standardmäßig weiß auf schwarzem
-Hintergrund und lässt sich per Tastatur vergrößern und verkleinern.
-Seit M2 lädt LyricsPi beim Start eine Setlist in den Arbeitsspeicher.
+Raspberry Pi 3. Unter Windows lädt LyricsPi beim Start die Setlist in den
+Arbeitsspeicher und zeigt den ersten Song in einem Pygame-Fenster. Der
+Text ist standardmäßig weiß auf schwarzem Hintergrund und beginnt
+linksbündig am oberen Rand. Die Bedienung erfolgt per Tastatur.
 
 ## Einrichtung unter Windows
 
@@ -18,7 +18,7 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-## Simulator starten
+## LyricsPi starten
 
 ```powershell
 .\.venv\Scripts\python.exe -m lyricspi.main
@@ -29,10 +29,29 @@ Anwendung protokolliert Tastaturaktionen im Entwicklungsmodus im Terminal.
 
 | Taste | Wirkung |
 | --- | --- |
-| Pfeil links / rechts | Protokolliert `PREVIOUS_SONG` / `NEXT_SONG` |
-| Pfeil hoch / runter | Protokolliert `PREVIOUS_PAGE` / `NEXT_PAGE` |
+| Pfeil links / rechts | Wechselt zum vorherigen / nächsten Song, jeweils auf Seite 1 |
+| Pfeil hoch / runter | Blättert innerhalb des aktuellen Songs zurück / weiter |
 | Minus / Plus | Verkleinert / vergrößert die Schrift innerhalb der konfigurierten Grenzen |
 | Escape | Beendet das Programm im Entwicklungsmodus |
+
+Nach dem letzten Song folgt wieder der erste. Vom ersten Song führt Pfeil
+links zum letzten. Beim Blättern bleibt die Anzeige auf der ersten bzw.
+letzten Seite stehen. Songtitel und Seitenzahlen stehen nur im Protokoll
+des Entwicklungsmodus.
+
+Lange Zeilen werden entsprechend der Fensterbreite umgebrochen. Strophen
+bleiben nach Möglichkeit zusammen. Zu lange Strophen werden auf mehrere
+Seiten verteilt. Nach einer Schrift- oder Fenstergrößenänderung berechnet
+LyricsPi die Seiten neu und behält den ausgewählten Song bei. Falls die
+bisherige Seite entfällt, zeigt LyricsPi die letzte verfügbare Seite.
+Ist das Fenster zu klein für Songtext, zeigt es einen Hinweis.
+
+Für Akkorde verwendet LyricsPi bevorzugt eine Monospace-Systemschrift.
+Führende Leerzeichen bleiben beim Darstellen erhalten. Tabs werden zur
+Anzeige in Abstände mit vier Spalten pro Tabstopp umgesetzt. Wenn lange
+Akkord- und Textzeilen an unterschiedlichen Stellen umbrechen, können sich
+die Akkorde relativ zum Text verschieben. Ist keine der unterstützten
+Monospace-Schriften installiert, verwendet Pygame seine Standardschrift.
 
 ## Konfiguration
 
@@ -49,16 +68,15 @@ Mit `--config PFAD` lässt sich eine andere Datei auswählen. Fehlende Felder
 verwenden ihre Standardwerte. Ungültige Dateien führen zu einer
 Fehlermeldung im Terminal.
 
-- `display` bestimmt Fenstergröße, Schrift, Farben (`#RRGGBB`) und Rand
-  in ganzen Prozent (0–49). Mit `fullscreen: true` startet die Anwendung
-  im Vollbild bei Desktop-Auflösung.
+- `display` bestimmt Fenstergröße, Schrift, Farben (`#RRGGBB`), Rand
+  in ganzen Prozent (0–49) und zusätzlichen Zeilenabstand
+  (`line_spacing`, standardmäßig 4 Pixel). Mit `fullscreen: true` startet
+  die Anwendung im Vollbild bei Desktop-Auflösung.
 - `system.development_mode` aktiviert Tastaturprotokollierung und das
-  Beenden per Escape. `system.allow_keyboard` steuert die Tastatur insgesamt.
-  `system.show_splash` wird eingelesen und validiert. Die Demo startet
-  direkt mit dem Beispieltext.
+  Beenden per Escape. In diesem Modus lässt sich die Fenstergröße ändern.
+  `system.allow_keyboard` steuert die Tastatur insgesamt.
+  `system.show_splash` wird eingelesen und validiert.
 - Änderungen der Schriftgröße per Tastatur gelten bis zum Programmende.
-  Bei einer sehr kleinen Fensterhöhe kann der Beispieltext unten abgeschnitten
-  werden.
 
 ## Songordner und USB-Stick
 
@@ -111,10 +129,10 @@ Mount-Punkt. Trage dort den tatsächlichen Mount-Pfad des Sticks ein.
 
 Die Songquelle wird nur gelesen. Änderungen werden beim nächsten Start
 übernommen. Ein fehlender Stick, ein fehlender oder nicht lesbarer Songordner
-und eine leere Setlist erscheinen als Hinweis unter dem Demotext. Ungültige,
+und eine leere Setlist erscheinen als Hinweis. Ungültige,
 leere oder nicht lesbare Einzeldateien werden übersprungen und protokolliert.
-Das Terminal zeigt die Anzahl geladener Songs und im Entwicklungsmodus
-den ersten Song. Im Fenster bleibt der Demotext sichtbar.
+Das Terminal zeigt die Anzahl geladener Songs und im Entwicklungsmodus den
+aktuellen Song, die Seite und die Gesamtseitenzahl.
 
 ## Tests ausführen
 
@@ -123,3 +141,4 @@ den ersten Song. Im Fenster bleibt der Demotext sichtbar.
 ```
 
 Die Songtests erzeugen temporäre Dateien und simulieren die USB-Erkennung.
+Die Anzeigetests verwenden den simulierten SDL-Videotreiber.

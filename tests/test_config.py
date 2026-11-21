@@ -84,6 +84,8 @@ def test_explicit_missing_file_reports_path(tmp_path: Path) -> None:
         ("display", "background", "white"),
         ("display", "window_width", 0),
         ("display", "margin_percent", 50),
+        ("display", "line_spacing", -1),
+        ("display", "line_spacing", True),
         ("display", "fullscreen", "false"),
         ("system", "show_splash", 1),
         ("system", "unknown", True),
@@ -149,3 +151,12 @@ def test_invalid_song_config_is_rejected(
 
     with pytest.raises(ConfigError, match=rf"songs\.{key}"):
         load_config(path)
+
+
+@pytest.mark.parametrize("spacing", [0, 12])
+def test_configures_line_spacing(tmp_path: Path, spacing: int) -> None:
+    path = tmp_path / "display.json"
+    path.write_text(
+        json.dumps({"display": {"line_spacing": spacing}}), encoding="utf-8"
+    )
+    assert load_config(path).display.line_spacing == spacing

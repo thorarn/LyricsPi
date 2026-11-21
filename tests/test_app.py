@@ -9,6 +9,7 @@ from lyricspi import Action
 from lyricspi import app
 from lyricspi.app import AppState, run
 from lyricspi.config import Config, DisplayConfig, SongsConfig, SystemConfig
+from lyricspi.layout import Page
 from lyricspi.renderer import Renderer
 from lyricspi.song_loader import SongLoadIssue
 
@@ -44,7 +45,7 @@ def test_exit_stops_application_state() -> None:
     assert state.last_action is Action.EXIT
 
 
-def test_demo_draws_resizes_logs_navigation_and_exits(
+def test_song_draws_resizes_logs_navigation_and_exits(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
@@ -55,6 +56,7 @@ def test_demo_draws_resizes_logs_navigation_and_exits(
                 pygame.event.Event(pygame.KEYDOWN, key=pygame.K_PLUS),
             ],
             [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_MINUS)],
+            [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_LEFT)],
             [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
         ]
     )
@@ -70,7 +72,7 @@ def test_demo_draws_resizes_logs_navigation_and_exits(
     with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
         run(Config())
 
-    original, larger, restored = screens
+    original, larger, second, restored = screens
     assert original.get_size() == (1280, 720)
     assert original.get_at((0, 0)) == pygame.Color("#000000")
     image_bytes = pygame.image.tobytes(original, "RGB")
@@ -79,6 +81,8 @@ def test_demo_draws_resizes_logs_navigation_and_exits(
         for index in range(0, len(image_bytes), 3)
     )
     assert image_bytes != pygame.image.tobytes(larger, "RGB")
+    second_bytes = pygame.image.tobytes(second, "RGB")
+    assert second_bytes != pygame.image.tobytes(larger, "RGB")
     assert image_bytes == pygame.image.tobytes(restored, "RGB")
     assert "Tastaturaktion: NEXT_SONG" in caplog.text
     assert "Tastaturaktion: EXIT" in caplog.text
@@ -161,9 +165,9 @@ def test_app_loads_setlist_once_and_draws_startup_notice(
 
     # Mock the unbound method via a function so it still receives the instance.
     def draw_frame(
-        renderer: Renderer, font_size: int, notice: str | None
+        renderer: Renderer, font_size: int, page: Page, notice: str | None
     ) -> None:
-        draw(renderer, font_size, notice)
+        draw(renderer, font_size, page, notice)
 
     monkeypatch.setattr(Renderer, "draw", draw_frame)
     with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
@@ -171,9 +175,106 @@ def test_app_loads_setlist_once_and_draws_startup_notice(
 
     load.assert_called_once_with(config.songs)
     draw.assert_called_once()
-    assert draw.call_args.args[1:] == (48, issue.value if issue else None)
+    if issue:
+        assert draw.call_args.args[1:] == (48, (), issue.value)
+    else:
+        assert draw.call_args.args[1:] == (48, ("Lied",), None)
+    assert not pygame.display.get_init()
     if issue:
         assert "0 Songs geladen." in caplog.text
     else:
         assert "1 Songs geladen." in caplog.text
         assert "Erster Song: Demo (1_Demo.txt)" in caplog.text
+
+
+def test_page_layout_follows_font_and_window_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_lines = tuple(f"Erste Zeile {index}" for index in range(12))
+    (tmp_path / "1_Erster_Titel.txt").write_text(
+        "\n".join(first_lines), encoding="utf-8"
+    )
+    second_song = tmp_path / "2_Zweiter_Titel.txt"
+    second_song.write_text("Zweiter Text", encoding="utf-8")
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    steps = iter(
+        [
+            ([pygame.K_DOWN], None),
+            ([pygame.K_UP], None),
+            ([pygame.K_DOWN] * 20, None),
+            ([pygame.K_DOWN, pygame.K_MINUS], None),
+            ([], (640, 720)),
+            ([], (10, 5)),
+            ([], (640, 720)),
+            ([pygame.K_RIGHT], None),
+            ([pygame.K_RIGHT], None),
+            ([pygame.K_LEFT], None),
+            ([pygame.K_ESCAPE], None),
+        ]
+    )
+    frames: list[tuple[int, Page, str | None]] = []
+    original_draw = Renderer.draw
+
+    def draw(
+        renderer: Renderer, size: int, page: Page, notice: str | None
+    ) -> None:
+        original_draw(renderer, size, page, notice)
+        frames.append((size, page, notice))
+
+    def get_events() -> list[pygame.event.Event]:
+        keys, size = next(steps)
+        events = [pygame.event.Event(pygame.KEYDOWN, key=key) for key in keys]
+        if size is not None:
+            # The dummy driver needs an explicit change to the drawing surface.
+            pygame.display.set_mode(size, pygame.RESIZABLE)
+            events.append(
+                pygame.event.Event(
+                    pygame.WINDOWSIZECHANGED, x=size[0], y=size[1]
+                )
+            )
+        return events
+
+    monkeypatch.setattr(Renderer, "draw", draw)
+    monkeypatch.setattr(pygame.event, "get", get_events)
+    display = DisplayConfig(window_width=640, window_height=160, font_step=24)
+    run(Config(display=display, songs=SongsConfig(directory=str(tmp_path))))
+
+    (
+        start, second, previous, end, smaller, expanded, tiny, recovered,
+        next_song, wrapped, back,
+    ) = frames
+    assert start == previous
+    assert start[1][0] == first_lines[0]
+    assert second[1][0] == first_lines[len(start[1])]
+    assert end[1][-1] == smaller[1][-1] == first_lines[-1]
+    assert smaller[0] == 24
+    assert expanded == recovered == wrapped == (24, first_lines, None)
+    assert tiny == (24, (), app.SMALL_WINDOW_NOTICE)
+    assert next_song == back == (24, ("Zweiter Text",), None)
+
+
+def test_renderer_keeps_all_glyphs_inside_content_area(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    config = DisplayConfig(
+        window_width=240, window_height=180, margin_percent=10
+    )
+    try:
+        renderer = Renderer(config)
+        pages = renderer.layout("ÄgWp" * 40 + "\n  Am    C\nGrüße", 36)
+        assert len(pages) > 1
+        for page in pages:
+            renderer.draw(36, page)
+            mask = pygame.mask.from_threshold(
+                renderer.screen, (0, 0, 0, 255), (1, 1, 1, 255)
+            )
+            mask.invert()
+            glyph_bounds = mask.get_bounding_rects()
+            assert glyph_bounds
+            assert all(
+                renderer._content_area().contains(bounds)
+                for bounds in glyph_bounds
+            )
+    finally:
+        pygame.quit()

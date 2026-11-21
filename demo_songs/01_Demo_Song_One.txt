@@ -1,3 +1,36 @@
+[Strophe1]
+Wenn der Morgen über Dächer zieht,
+öffnet sich die Tür.
+Ein Fahrrad klingelt leise.
+
+Später glühen alle Fenster,
+und der Abend bleibt noch kurz bei mir.
+
+[Strophe2]
+Wenn der Morgen über Dächer zieht,
+öffnet sich die Tür.
+Ein Fahrrad klingelt leise.
+
+Später glühen alle Fenster,
+und der Abend bleibt noch kurz bei mir.
+
+[Strophe3]
+Wenn der Morgen über Dächer zieht,
+öffnet sich die Tür.
+Ein Fahrrad klingelt leise.
+
+Später glühen alle Fenster,
+und der Abend bleibt noch kurz bei mir.
+
+[Strophe4]
+Wenn der Morgen über Dächer zieht,
+öffnet sich die Tür.
+Ein Fahrrad klingelt leise.
+
+Später glühen alle Fenster,
+und der Abend bleibt noch kurz bei mir.
+
+[Strophe5]
 Wenn der Morgen über Dächer zieht,
 öffnet sich die Tür.
 Ein Fahrrad klingelt leise.
