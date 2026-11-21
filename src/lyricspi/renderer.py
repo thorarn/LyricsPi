@@ -1,6 +1,7 @@
 """Measure and draw song pages and notices on the Pygame display."""
 
 import logging
+from functools import lru_cache
 from pathlib import Path
 from sys import platform
 
@@ -8,10 +9,18 @@ import pygame
 
 from .config import DisplayConfig
 from .layout import LayoutTooSmall, Page, paginate
+from .setlist import Song
 
 
 LOGGER = logging.getLogger(__name__)
 FONT_NAMES = ("Consolas", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
+TRACK_COLOR = pygame.Color("#555555")
+
+
+def progress_position(page_index: int, page_count: int) -> float:
+    if page_count <= 1:
+        return 0.5
+    return max(0.0, min(1.0, page_index / (page_count - 1)))
 
 
 class Renderer:
@@ -52,8 +61,7 @@ class Renderer:
         self.background = pygame.Color(config.background)
         self.margin_percent = config.margin_percent
         self.line_spacing = config.line_spacing
-        self.font: pygame.font.Font | None = None
-        self.font_size = 0
+        self._fonts = lru_cache(maxsize=8)(pygame.font.SysFont)
 
     def load_splash_logo(self, path: Path) -> pygame.Surface | None:
         try:
@@ -79,10 +87,7 @@ class Renderer:
         pygame.display.flip()
 
     def _font_for_size(self, size: int) -> pygame.font.Font:
-        if self.font is None or self.font_size != size:
-            self.font = pygame.font.SysFont(FONT_NAMES, size)
-            self.font_size = size
-        return self.font
+        return self._fonts(FONT_NAMES, size)
 
     def _content_area(self) -> pygame.Rect:
         width, height = self.screen.get_size()
@@ -90,8 +95,40 @@ class Renderer:
         y = height * self.margin_percent // 100
         return pygame.Rect(x, y, width - 2 * x, height - 2 * y)
 
-    def layout(self, content: str, font_size: int) -> tuple[Page, ...]:
+    def layout(
+        self, content: str, font_size: int, *, song: Song | None = None
+    ) -> tuple[Page, ...]:
+        _, _, lyrics = self._song_areas(self._font_for_size(font_size), song)
+        return self._paginate(content, font_size, lyrics)
+
+    def _song_areas(
+        self, font: pygame.font.Font, song: Song | None = None
+    ) -> tuple[pygame.Rect, pygame.Rect, pygame.Rect]:
         area = self._content_area()
+        text_height = font.get_height()
+        if song is not None:
+            text_height = max(
+                text_height, font.size(song.title)[1],
+                font.size(song.display_number)[1],
+            )
+        base_height = min(108, area.height // 6)
+        height = min(area.height, max(28, base_height, text_height))
+        gap = max(4, min(12, area.height // 30))
+        rail_width = max(2, min(8, area.width // 40))
+        gutter = rail_width + max(4, min(16, area.width // 30))
+        header = pygame.Rect(area.left, area.top, area.width, height)
+        body_top = min(area.bottom, header.bottom + gap)
+        rail = pygame.Rect(
+            area.left, body_top, rail_width, area.bottom - body_top
+        )
+        lyrics = pygame.Rect(
+            area.left + gutter, body_top, max(0, area.width - gutter), rail.height
+        )
+        return header, rail, lyrics
+
+    def _paginate(
+        self, content: str, font_size: int, area: pygame.Rect
+    ) -> tuple[Page, ...]:
         font = self._font_for_size(font_size)
         return paginate(
             content,
@@ -103,16 +140,28 @@ class Renderer:
         )
 
     def draw(
-        self, font_size: int, page: Page, notice: str | None = None
+        self,
+        font_size: int,
+        page: Page,
+        notice: str | None = None,
+        *,
+        song: Song | None = None,
+        page_index: int = 0,
+        page_count: int = 1,
     ) -> None:
         self.screen.fill(self.background)
         area = self._content_area()
         if notice is None:
-            self._draw_lines(page, self._font_for_size(font_size), area)
+            font = self._font_for_size(font_size)
+            header, rail, lyrics = self._song_areas(font, song)
+            if song is not None:
+                self._draw_header(song, font, header)
+                self._draw_progress(rail, page_index, page_count)
+            self._draw_lines(page, font, lyrics)
         elif area.width > 0 and area.height > 0:
             notice_size = min(font_size, 32)
             try:
-                pages = self.layout(notice, notice_size)
+                pages = self._paginate(notice, notice_size, area)
             except LayoutTooSmall:
                 pages = ()
             font = self._font_for_size(notice_size)
@@ -127,6 +176,43 @@ class Renderer:
                     pygame.transform.smoothscale(text, size), area
                 )
         pygame.display.flip()
+
+    def _draw_header(
+        self, song: Song, font: pygame.font.Font, header: pygame.Rect
+    ) -> None:
+        gap = 8
+        number_width = header.width - font.size("…")[0] - gap
+        number_text = self._ellipsize(song.display_number, font, number_width)
+        number = font.render(number_text, True, self.foreground)
+        self.screen.blit(number, number.get_rect(midright=header.midright))
+
+        title_width = header.width - number.get_width() - gap
+        title = self._ellipsize(song.title, font, title_width)
+        text = font.render(title, True, self.foreground)
+        self.screen.blit(text, text.get_rect(midleft=header.midleft))
+
+    @staticmethod
+    def _ellipsize(text: str, font: pygame.font.Font, width: int) -> str:
+        if font.size(text)[0] <= width:
+            return text
+        ellipsis = "…"
+        if font.size(ellipsis)[0] > width:
+            return ""
+        while font.size(text + ellipsis)[0] > width:
+            text = text[:-1]
+        return text.rstrip() + ellipsis
+
+    def _draw_progress(
+        self, track: pygame.Rect, page_index: int, page_count: int
+    ) -> None:
+        pygame.draw.rect(self.screen, TRACK_COLOR, track)
+        marker_height = min(track.height, max(12, track.height // 12))
+        position = progress_position(page_index, page_count)
+        offset = round((track.height - marker_height) * position)
+        marker = pygame.Rect(
+            track.left, track.top + offset, track.width, marker_height
+        )
+        pygame.draw.rect(self.screen, self.foreground, marker)
 
     def _draw_lines(
         self, page: Page, font: pygame.font.Font, area: pygame.Rect

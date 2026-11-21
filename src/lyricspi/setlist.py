@@ -1,5 +1,6 @@
 """Song metadata and the ordered, read-only setlist."""
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +12,11 @@ class Song:
     path: Path
     title: str
     content: str
+
+    @property
+    def display_number(self) -> str:
+        prefix = re.match(r"[0-9]+", self.filename)
+        return prefix[0] if prefix else str(self.number)
 
 
 @dataclass(frozen=True)

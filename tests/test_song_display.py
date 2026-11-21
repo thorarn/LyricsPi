@@ -1,0 +1,172 @@
+from collections.abc import Iterator
+from pathlib import Path
+from unittest.mock import Mock, call, patch
+
+import pygame
+import pytest
+
+from lyricspi.app import run
+from lyricspi.config import Config, DisplayConfig, PROJECT_ROOT, SongsConfig
+from lyricspi.layout import Page
+from lyricspi.renderer import Renderer, TRACK_COLOR, progress_position
+from lyricspi.setlist import Song
+from lyricspi.song_loader import load_songs
+
+
+@pytest.fixture
+def renderer(monkeypatch: pytest.MonkeyPatch) -> Iterator[Renderer]:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    try:
+        yield Renderer(DisplayConfig())
+    finally:
+        pygame.quit()
+
+
+def test_demo_songs_have_distinct_lengths_and_fill_multiple_pages(
+    renderer: Renderer,
+) -> None:
+    songs = load_songs(PROJECT_ROOT / "demo_songs").setlist
+    assert len(songs) == 5
+    lengths = {len(song.content.splitlines()) for song in songs}
+    assert min(lengths) >= 30
+    assert len(lengths) >= 4
+    for song in songs:
+        for marker in ("[Strophe 1]", "[Refrain]", "[Solo]"):
+            assert marker in song.content.splitlines()
+        pages = renderer.layout(song.content, 48)
+        assert len(pages) > 1
+        assert "[Refrain]" in [line for page in pages for line in page]
+
+
+@pytest.mark.parametrize("separator", ["_", " - "])
+@pytest.mark.parametrize("number", ["1", "01", "001"])
+def test_display_number_keeps_filename_padding(
+    tmp_path: Path, separator: str, number: str,
+) -> None:
+    path = tmp_path / f"{number}{separator}Mein Song.txt"
+    path.write_text("Text", encoding="utf-8")
+    song = load_songs(tmp_path).setlist.first
+    assert song is not None
+    assert song.number == 1
+    assert song.display_number == number
+    assert song.title == "Mein Song"
+
+
+def test_page_layout_reserves_header_and_progress_gutter(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outer = renderer._content_area()
+    header, rail, lyrics = renderer._song_areas(renderer._font_for_size(48))
+    assert header.top == outer.top
+    assert header.bottom < lyrics.top
+    assert rail.right < lyrics.left
+    assert lyrics.right == outer.right
+    assert lyrics.bottom == outer.bottom
+    assert rail.height == lyrics.height
+    paginate = Mock(wraps=renderer._paginate)
+    monkeypatch.setattr(renderer, "_paginate", paginate)
+    renderer.layout("Text", 48)
+    paginate.assert_called_once_with("Text", 48, lyrics)
+
+
+@pytest.mark.parametrize(
+    ("index", "count", "position"),
+    [(0, 3, 0.0), (1, 3, 0.5), (2, 3, 1.0), (0, 1, 0.5)],
+)
+def test_progress_indicator_matches_page_and_stays_inside_rail(
+    renderer: Renderer, index: int, count: int, position: float
+) -> None:
+    assert progress_position(index, count) == position
+    _, rail, _ = renderer._song_areas(renderer._font_for_size(48))
+    path = Path("01 - Mein Song.txt")
+    song = Song(1, path.name, path, "Mein Song", "Text")
+    renderer.draw(48, ("Text",), song=song, page_index=index, page_count=count)
+    marker_height = min(rail.height, max(12, rail.height // 12))
+    top = rail.top + round((rail.height - marker_height) * position)
+    assert renderer.screen.get_at((rail.centerx, top)) == renderer.foreground
+    assert renderer.screen.get_at((rail.centerx, top + marker_height - 1)) == renderer.foreground
+    outside_marker = top - 1 if top > rail.top else top + marker_height
+    assert renderer.screen.get_at((rail.centerx, outside_marker)) == TRACK_COLOR
+
+
+def test_header_renders_title_and_number_and_stays_fixed_between_pages(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = Path("01 - Mein Song.txt")
+    song = Song(1, path.name, path, "Mein Song", "Text")
+    header, _, lyrics = renderer._song_areas(renderer._font_for_size(48), song)
+    text_font = Mock(wraps=renderer._font_for_size(48))
+    font_for_size = Mock(return_value=text_font)
+    monkeypatch.setattr(renderer, "_font_for_size", font_for_size)
+    renderer.draw(48, ("Erste Zeile",), song=song, page_index=0, page_count=2)
+    first_header = pygame.image.tostring(renderer.screen.subsurface(header), "RGB")
+    first_lyrics = pygame.image.tostring(renderer.screen.subsurface(lyrics), "RGB")
+    font_for_size.assert_called_once_with(48)
+    assert text_font.render.call_args_list == [
+        call(text, True, renderer.foreground)
+        for text in ("01", "Mein Song", "Erste Zeile")
+    ]
+
+    renderer.draw(48, ("Andere Zeile",), song=song, page_index=1, page_count=2)
+    assert pygame.image.tostring(renderer.screen.subsurface(header), "RGB") == first_header
+    assert pygame.image.tostring(renderer.screen.subsurface(lyrics), "RGB") != first_lyrics
+
+
+def test_taller_font_increases_header_and_leaves_lyrics_room(
+    renderer: Renderer,
+) -> None:
+    path = Path("01 - Mein Song.txt")
+    song = Song(1, path.name, path, "Mein Song", "\n".join(["Lied"] * 20))
+    standard_header, _, _ = renderer._song_areas(
+        renderer._font_for_size(48), song
+    )
+    font_size = 160
+    font = renderer._font_for_size(font_size)
+    header, _, lyrics = renderer._song_areas(font, song)
+
+    assert header.height > standard_header.height
+    assert header.height >= max(font.size(song.title)[1], font.size("01")[1])
+    assert header.bottom < lyrics.top
+    pages = renderer.layout(song.content, font_size, song=song)
+    assert len(pages) > 1
+    for page in pages:
+        height = sum(max(font.size(line)[1], font.get_height()) for line in page)
+        height += renderer.line_spacing * (len(page) - 1)
+        assert height <= lyrics.height
+
+
+def test_plus_and_minus_resize_every_song_text_element(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "01 - Mein Song.txt").write_text(
+        "[Strophe 1]\nErste Zeile", encoding="utf-8"
+    )
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    keys = iter((pygame.K_PLUS, pygame.K_MINUS, pygame.K_ESCAPE))
+    monkeypatch.setattr(
+        pygame.event, "get",
+        lambda: [pygame.event.Event(pygame.KEYDOWN, key=next(keys))],
+    )
+    draw = Renderer.draw
+    drawn_sizes = []
+
+    def capture(
+        renderer: Renderer, font_size: int, page: Page, notice: str | None,
+        **song_view,
+    ) -> None:
+        font = Mock(wraps=renderer._font_for_size(font_size))
+        with patch.object(renderer, "_font_for_size", return_value=font) as select:
+            draw(renderer, font_size, page, notice, **song_view)
+        select.assert_called_once_with(font_size)
+        assert font.render.call_args_list == [
+            call(text, True, renderer.foreground)
+            for text in ("01", "Mein Song", "[Strophe 1]", "Erste Zeile")
+        ]
+        drawn_sizes.append(font_size)
+
+    monkeypatch.setattr(Renderer, "draw", capture)
+    run(Config(
+        display=DisplayConfig(font_size=40),
+        songs=SongsConfig(directory=str(tmp_path)),
+    ))
+    assert drawn_sizes == [40, 44, 40]

@@ -70,7 +70,7 @@ def _update_layout(state: AppState, renderer: Renderer) -> None:
     if song is None:
         return
     try:
-        state.pages = renderer.layout(song.content, state.font_size)
+        state.pages = renderer.layout(song.content, state.font_size, song=song)
     except LayoutTooSmall:
         state.pages = ()
     state.navigation.clamp_page(len(state.pages))
@@ -93,7 +93,14 @@ def _draw(
         LOGGER.debug(
             "Seite %d/%d", state.navigation.page_index + 1, len(state.pages)
         )
-    renderer.draw(state.font_size, state.page, notice)
+    renderer.draw(
+        state.font_size,
+        state.page,
+        notice,
+        song=state.song,
+        page_index=state.navigation.page_index,
+        page_count=len(state.pages),
+    )
 
 
 def _apply_keyboard_action(

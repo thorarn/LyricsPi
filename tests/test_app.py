@@ -170,9 +170,10 @@ def test_app_loads_setlist_once_and_draws_startup_notice(
 
     # Mock the unbound method via a function so it still receives the instance.
     def draw_frame(
-        renderer: Renderer, font_size: int, page: Page, notice: str | None
+        renderer: Renderer, font_size: int, page: Page, notice: str | None,
+        **song_view,
     ) -> None:
-        draw(renderer, font_size, page, notice)
+        draw(renderer, font_size, page, notice, **song_view)
 
     monkeypatch.setattr(Renderer, "draw", draw_frame)
     with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
@@ -182,8 +183,11 @@ def test_app_loads_setlist_once_and_draws_startup_notice(
     draw.assert_called_once()
     if issue:
         assert draw.call_args.args[1:] == (48, (), issue.value)
+        assert draw.call_args.kwargs["song"] is None
     else:
         assert draw.call_args.args[1:] == (48, ("Lied",), None)
+        assert draw.call_args.kwargs["song"].title == "Demo"
+        assert draw.call_args.kwargs["page_count"] == 1
     assert not pygame.display.get_init()
     if issue:
         assert "0 Songs geladen." in caplog.text
@@ -218,13 +222,16 @@ def test_page_layout_follows_font_and_window_changes(
         ]
     )
     frames: list[tuple[int, Page, str | None]] = []
+    positions: list[tuple[int, int]] = []
     original_draw = Renderer.draw
 
     def draw(
-        renderer: Renderer, size: int, page: Page, notice: str | None
+        renderer: Renderer, size: int, page: Page, notice: str | None,
+        **song_view,
     ) -> None:
-        original_draw(renderer, size, page, notice)
+        original_draw(renderer, size, page, notice, **song_view)
         frames.append((size, page, notice))
+        positions.append((song_view["page_index"], song_view["page_count"]))
 
     def get_events() -> list[pygame.event.Event]:
         keys, size = next(steps)
@@ -263,6 +270,10 @@ def test_page_layout_follows_font_and_window_changes(
     assert expanded == recovered == wrapped == (24, first_lines, None)
     assert tiny == (24, (), app.SMALL_WINDOW_NOTICE)
     assert next_song == back == (24, ("Zweiter Text",), None)
+    assert positions[0][0] == 0
+    assert positions[1][0] == 1
+    assert positions[3][0] == positions[3][1] - 1
+    assert positions[-1] == (0, 1)
 
 
 def test_renderer_keeps_all_glyphs_inside_content_area(
@@ -414,10 +425,11 @@ def test_splash_transitions_to_song_and_processes_input(
     draw = Renderer.draw
 
     def capture_page(
-        renderer: Renderer, size: int, page: Page, notice: str | None
+        renderer: Renderer, size: int, page: Page, notice: str | None,
+        **song_view,
     ) -> None:
         pages.append((size, page))
-        draw(renderer, size, page, notice)
+        draw(renderer, size, page, notice, **song_view)
 
     def events() -> list[pygame.event.Event]:
         screen = pygame.display.get_surface()

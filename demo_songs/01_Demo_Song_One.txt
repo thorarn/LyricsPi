@@ -1,39 +1,57 @@
-[Strophe1]
+[Strophe 1]
 Wenn der Morgen über Dächer zieht,
 öffnet sich die Tür.
 Ein Fahrrad klingelt leise.
+Die Hauswand hält das erste Licht,
+ein gelber Fleck auf grauem Putz.
 
+[Strophe 2]
+Die Bäckerin hebt ihren Laden an.
+Auf der Schwelle liegt noch Regen.
+Ein Bleistift rollt vom Fenstersims,
+bis ihn der Rand der Straße fängt.
+Ich lege ihn auf die niedrige Mauer.
+
+[Refrain]
 Später glühen alle Fenster,
 und der Abend bleibt noch kurz bei mir.
+Ein heller Streifen auf den Fliesen
+führt von der Küche bis zur Tür.
+Ich gehe ihm in Socken nach.
 
-[Strophe2]
-Wenn der Morgen über Dächer zieht,
-öffnet sich die Tür.
-Ein Fahrrad klingelt leise.
+[Strophe 3]
+Mittags stehen die Fahrräder
+mit den Lenkern dicht beisammen.
+Zwischen zwei Speichen wippt ein Blatt.
+Ein Bus fährt aus der Haltestelle.
+Der Platz hat wieder seinen eigenen Ton.
 
+[Bridge]
+Ein Handtuch trocknet auf dem Balkon.
+Darunter flimmert die Luft.
+Ich drehe die Uhr zur Wand
+und höre auf die Schritte im Hof.
+
+[Solo]
+Lass den nächsten Takt leer.
+Dann setz leise wieder ein.
+
+[Strophe 4]
+Am späten Nachmittag sammelt jemand
+die Kreidestriche auf dem Pflaster ein.
+Drei Ecken bleiben neben der Tonne.
+Ich trete über eine Linie
+und schiebe mein Rad nach Hause.
+
+[Refrain]
 Später glühen alle Fenster,
 und der Abend bleibt noch kurz bei mir.
+Ein heller Streifen auf den Fliesen
+führt von der Küche bis zur Tür.
+Ich gehe ihm in Socken nach.
 
-[Strophe3]
-Wenn der Morgen über Dächer zieht,
-öffnet sich die Tür.
-Ein Fahrrad klingelt leise.
-
-Später glühen alle Fenster,
-und der Abend bleibt noch kurz bei mir.
-
-[Strophe4]
-Wenn der Morgen über Dächer zieht,
-öffnet sich die Tür.
-Ein Fahrrad klingelt leise.
-
-Später glühen alle Fenster,
-und der Abend bleibt noch kurz bei mir.
-
-[Strophe5]
-Wenn der Morgen über Dächer zieht,
-öffnet sich die Tür.
-Ein Fahrrad klingelt leise.
-
-Später glühen alle Fenster,
-und der Abend bleibt noch kurz bei mir.
+[Outro]
+Der Bleistift liegt noch auf der Mauer.
+Die Straße ist schon kühl.
+Oben brennt ein einziges Fenster.
+Ich weiß, welches es ist.

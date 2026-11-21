@@ -38,8 +38,16 @@ Anwendung protokolliert Tastaturaktionen im Entwicklungsmodus im Terminal.
 
 Nach dem letzten Song folgt wieder der erste. Vom ersten Song führt Pfeil
 links zum letzten. Beim Blättern bleibt die Anzeige auf der ersten bzw.
-letzten Seite stehen. Songtitel und Seitenzahlen stehen nur im Protokoll
-des Entwicklungsmodus.
+letzten Seite stehen.
+
+Die feste Kopfzeile zeigt links den Songtitel und rechts die Songnummer
+aus dem Dateinamen samt führender Nullen. Titel, Nummer, Songtext und
+Abschnittsmarker verwenden dieselbe Schriftgröße. Plus und Minus ändern
+sie gemeinsam.
+Lange Titel werden mit Auslassungspunkten gekürzt. Die Songtexte
+beginnen darunter. Der Balken links zeigt die Position innerhalb des
+Songs. Seine Markierung steht auf der ersten Seite oben und auf der
+letzten Seite unten. Bei einem einseitigen Song steht sie mittig.
 
 Lange Zeilen werden entsprechend der Fensterbreite umgebrochen. Strophen
 bleiben nach Möglichkeit zusammen. Zu lange Strophen werden auf mehrere
@@ -148,8 +156,10 @@ Verwende `Nummer_Songname.txt` oder `Nummer - Songname.txt`, etwa
 nicht. Bei gleicher Nummer gilt die Reihenfolge der vollständigen Dateinamen.
 Unterordner und symbolische Links werden übersprungen.
 
-Ohne weitere Einstellungen lädt LyricsPi den mitgelieferten Ordner
-`demo_songs`. Für einen anderen Ordner ergänze oder ändere den Abschnitt
+Ohne weitere Einstellungen lädt LyricsPi die fünf frei erfundenen,
+mehrseitigen Songs in `demo_songs`. Abschnittsmarker wie `[Strophe 1]`,
+`[Refrain]` und `[Solo]` erscheinen als Teil des Songtexts.
+Für einen anderen Ordner ergänze oder ändere den Abschnitt
 `songs` in `config/config.json`. Relative Songordner und Mount-Pfade
 beziehen sich auf den Projektroot. Absolute Pfade sind ebenfalls möglich.
 
