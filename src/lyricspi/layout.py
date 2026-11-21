@@ -1,7 +1,6 @@
 """Wrap and paginate lyrics using measured text dimensions."""
 
 from collections.abc import Callable, Iterator
-from itertools import groupby
 
 
 Page = tuple[str, ...]
@@ -60,7 +59,7 @@ def paginate(
     line_height: int,
     line_spacing: int,
 ) -> tuple[Page, ...]:
-    """Return pages that fit, keeping short stanzas together."""
+    """Fill each page with consecutive complete rows."""
     if width < 1 or height < line_height:
         raise LayoutTooSmall
 
@@ -69,46 +68,26 @@ def paginate(
     pages: list[Page] = []
     page: list[str] = []
     used = 0
-    has_text = False
-
-    def finish_page() -> None:
-        nonlocal used, has_text
-        if has_text:
-            pages.append(tuple(page))
-        page.clear()
-        used = 0
-        has_text = False
-
-    original_lines = groupby(
-        content.splitlines(), lambda line: bool(line.strip())
-    )
-    for stanza, lines in original_lines:
-        wrapped = (
-            row
-            for line in lines
-            # Tabs use four-column stops. SDL_ttf cannot render embedded NULs.
-            for row in _wrap_line(
-                line.expandtabs(4).replace("\x00", "\ufffd"), width, measure
-            )
-        )
-        rows = [
-            (row, max(line_height, measure(row)[1]) + line_spacing)
-            if row.strip()
-            else (row, line_height + line_spacing)
-            for row in wrapped
-        ]
-        stanza_height = sum(cost for _, cost in rows)
-        if stanza and stanza_height <= available < used + stanza_height:
-            finish_page()
-
-        for row, cost in rows:
+    for line in content.splitlines():
+        # Tabs use four-column stops. SDL_ttf cannot render embedded NULs.
+        display_line = line.expandtabs(4).replace("\x00", "\ufffd")
+        for row in _wrap_line(display_line, width, measure):
+            row_height = line_height
+            if row.strip():
+                row_height = max(line_height, measure(row)[1])
+            cost = row_height + line_spacing
             if cost > available:
                 raise LayoutTooSmall
             if used + cost > available:
-                finish_page()
+                pages.append(tuple(page))
+                page.clear()
+                used = 0
             page.append(row)
             used += cost
-            has_text |= bool(row.strip())
 
-    finish_page()
+    if page:
+        pages.append(tuple(page))
+    # Keep blank rows inside the song, including across a page boundary.
+    while pages and not any(row.strip() for row in pages[-1]):
+        pages.pop()
     return tuple(pages)

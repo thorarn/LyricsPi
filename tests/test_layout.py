@@ -35,11 +35,55 @@ def test_uses_measured_width_and_height_with_spacing() -> None:
     )
 
 
-def test_keeps_short_stanza_together_at_page_boundary() -> None:
+def test_page_fills_with_one_and_a_half_stanzas() -> None:
     assert paginate("A\nB\n\nC\nD", 20, 4, measure, 1, 0) == (
-        ("A", "B", ""),
-        ("C", "D"),
+        ("A", "B", "", "C"),
+        ("D",),
     )
+
+
+def test_pages_fit_rows_of_different_measured_heights() -> None:
+    heights = {"A": 3, "B": 2, "C": 4, "D": 1, "E": 1}
+
+    def dimensions(text: str) -> tuple[int, int]:
+        return len(text), heights[text]
+
+    assert paginate("A\nB\nC\nD\nE", 20, 6, dimensions, 1, 1) == (
+        ("A", "B"),
+        ("C", "D"),
+        ("E",),
+    )
+
+
+@pytest.mark.parametrize("rows_per_page", [2, 4])
+def test_stanza_can_fit_or_continue_on_second_page(rows_per_page: int) -> None:
+    lines = ("[Strophe 1]", "A", "B", "C")
+    pages = paginate("\n".join(lines), 20, rows_per_page, measure, 1, 0)
+    assert pages == tuple(
+        lines[start : start + rows_per_page]
+        for start in range(0, len(lines), rows_per_page)
+    )
+
+
+def test_section_marker_can_be_last_line_and_chorus_crosses_page_boundary() -> None:
+    lines = ("Strophe", "", "[Refrain]", "R1", "R2", "R3", "R4", "[Solo]")
+    pages = paginate("\n".join(lines), 20, 3, measure, 1, 0)
+
+    assert pages == (lines[:3], lines[3:6], lines[6:])
+    assert tuple(row for page in pages for row in page) == lines
+
+
+def test_blank_rows_are_counted_even_across_page_boundaries() -> None:
+    lines = ("A", "", "", "   ", "", "B", "C")
+    pages = paginate("\n".join(lines), 20, 2, measure, 1, 0)
+
+    assert pages == (("A", ""), ("", "   "), ("", "B"), ("C",))
+    assert tuple(row for page in pages for row in page) == lines
+
+
+def test_wrapped_rows_are_paginated_individually_in_order() -> None:
+    pages = paginate("ABCDEFGHI\n\nJKL", 3, 2, measure, 1, 0)
+    assert pages == (("ABC", "DEF"), ("GHI", ""), ("JKL",))
 
 
 def test_splits_long_stanza_and_omits_blank_pages_at_end() -> None:
@@ -50,7 +94,8 @@ def test_splits_long_stanza_and_omits_blank_pages_at_end() -> None:
     assert tuple(row for page in pages for row in page if row) == tuple(
         content.splitlines()
     )
-    assert all(1 <= len(page) <= 7 for page in pages)
+    assert all(len(page) == 7 for page in pages[:-1])
+    assert pages[-1] == (*content.splitlines()[-2:], "", "", "")
     assert paginate("A\n\n\n\n", 30, 1, measure, 1, 0) == (("A",),)
 
 
