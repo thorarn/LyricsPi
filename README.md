@@ -31,7 +31,8 @@ Anwendung protokolliert Tastaturaktionen im Entwicklungsmodus im Terminal.
 | Taste | Wirkung |
 | --- | --- |
 | Pfeil links / rechts | Wechselt zum vorherigen / nächsten Song, jeweils auf Seite 1 |
-| Pfeil hoch / runter | Blättert innerhalb des aktuellen Songs zurück / weiter |
+| Pfeil hoch / runter (kurz) | Blättert zurück / beim Loslassen weiter |
+| Pfeil runter (mindestens 15 Sekunden halten) | Beendet LyricsPi |
 | Minus / Plus | Verkleinert / vergrößert die Schrift innerhalb der konfigurierten Grenzen |
 | Escape | Beendet das Programm im Entwicklungsmodus |
 
@@ -63,24 +64,35 @@ Pfeiltasten wie eine normale Tastatur.
 | Fußtaste | Tastatursignal | Funktion |
 | --- | --- | --- |
 | A | Pfeil hoch | Vorherige Seite |
-| B | Pfeil runter | Nächste Seite |
+| B (kurz) | Pfeil runter | Beim Loslassen genau eine Seite weiter |
+| B (mindestens 15 Sekunden halten) | Pfeil runter | LyricsPi beenden |
 | C | Pfeil links | Vorheriger Song |
 | D | Pfeil rechts | Nächster Song |
-| A + C | Pfeil hoch + links | Schrift verkleinern |
-| B + D | Pfeil runter + rechts | Schrift vergrößern |
 
-Drücke die beiden Tasten einer Kombination gleichzeitig oder kurz
-nacheinander. Die Einzelaktionen der erkannten Kombination entfallen.
-Bei aktiven Kombinationen wartet ein einzelner Pfeiltastendruck
-standardmäßig 150 ms, bevor er ausgeführt wird. Plus, Minus und Escape
-reagieren weiterhin sofort.
+A, C und D reagieren beim Drücken. Die bisherigen Tastenkombinationen
+entfallen. Die Schriftgröße änderst du mit Plus und Minus auf der Tastatur.
+Da Pygame dieselben Tastaturereignisse für beide Geräte liefert, gilt der
+lange Druck auch für Pfeil runter auf der normalen Tastatur.
 
-Pygame liefert Tastaturereignisse ohne Gerätekennung. Die Kombinationen
-gelten daher auch für die normale Tastatur. Fehlt ein Loslassereignis,
-etwa beim Abziehen des Controllers, kann dieselbe Pfeiltaste nach einer
-Ruhezeit wieder verwendet werden. Diese beträgt mindestens eine Sekunde
-und bei längeren Zeitfenstern das Doppelte des Kombinationsfensters.
-Bei Fokusverlust verwirft LyricsPi ausstehende Pfeiltastendrücke.
+Für einen kurzen Druck braucht LyricsPi ein zusammengehöriges `KEYDOWN`
+und `KEYUP`. Für das lange Halten muss das Betriebssystem Pfeil runter
+durchgehend als gedrückt melden. Sendet der M-VAVE beim Halten nur kurze
+HID-Impulse, ist die Beenden-Funktion mit diesem Controller nicht verfügbar.
+Autorepeat verlängert oder startet die Messung nicht neu. Bei Fokusverlust
+oder wenn der gemeldete Tastenzustand ohne `KEYUP` endet, verwirft LyricsPi
+die Messung. Im Entwicklungsmodus protokolliert das Terminal
+`KEYDOWN Arrow Down`, `KEYUP Arrow Down`, die gemessene Haltezeit und die Aktion.
+
+Unter Windows und im Entwicklungsmodus beendet ein langer Druck LyricsPi
+über `EXIT`. Im Raspberry-Pi-Produktivmodus erzeugt er `SHUTDOWN` und
+schließt LyricsPi. Das Herunterfahren des Systems folgt in M6.
+
+Für die Hardwareabnahme starte LyricsPi im Entwicklungsmodus mit einem
+mehrseitigen Song und prüfe A, B, C und D. Drücke B zunächst kurz und prüfe,
+dass beim Loslassen genau eine Seite weitergeblättert wird. Halte B dann
+mindestens 15 Sekunden. LyricsPi soll sich dabei ohne Seitenwechsel schließen.
+Wenn sich die Anwendung nicht schließt, prüfe im Terminal, ob der Controller
+beim Halten vorzeitig `KEYUP` sendet.
 
 ## Konfiguration
 
@@ -107,14 +119,16 @@ Fehlermeldung im Terminal.
   `system.show_splash` wird eingelesen und validiert.
 - Änderungen der Schriftgröße per Tastatur gelten bis zum Programmende.
 
-Unter `input` stellst du das Kombinationsfenster in Millisekunden ein.
-Mit `enable_combinations: false` reagieren die Pfeiltasten unmittelbar.
+Unter `input` steht `shutdown_key` auf `"down"` für Pfeil runter.
+`shutdown_hold_ms` legt die Haltedauer fest. Der Standard und zugleich
+die Untergrenze sind 15000 ms. Ersetze einen älteren M5-`input`-Abschnitt
+durch die folgenden Werte.
 
 ```json
 {
   "input": {
-    "combo_window_ms": 150,
-    "enable_combinations": true
+    "shutdown_key": "down",
+    "shutdown_hold_ms": 15000
   }
 }
 ```

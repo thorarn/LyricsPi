@@ -27,7 +27,7 @@
     "recursive": false
   },
   "input": {
-    "combo_window_ms": 150,
-    "enable_combinations": true
+    "shutdown_key": "down",
+    "shutdown_hold_ms": 15000
   }
 }

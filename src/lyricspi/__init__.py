@@ -11,3 +11,4 @@ class Action(Enum):
     FONT_SMALLER = auto()
     FONT_LARGER = auto()
     EXIT = auto()
+    SHUTDOWN = auto()

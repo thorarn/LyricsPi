@@ -60,8 +60,14 @@ class SongsConfig:
 
 @dataclass(frozen=True)
 class InputConfig:
-    combo_window_ms: int = 150
-    enable_combinations: bool = True
+    shutdown_key: str = "down"
+    shutdown_hold_ms: int = 15000
+
+    def __post_init__(self) -> None:
+        if self.shutdown_key != "down":
+            raise ConfigError("input.shutdown_key muss down sein.")
+        if self.shutdown_hold_ms < 15000:
+            raise ConfigError("input.shutdown_hold_ms muss mindestens 15000 sein.")
 
 
 @dataclass(frozen=True)
@@ -177,6 +183,4 @@ def load_config(path: Path | None = None) -> Config:
     keyboard = _load_section("input", data.get("input", {}), InputConfig())
     _validate_display(display)
     _validate_songs(songs)
-    if keyboard.combo_window_ms < 1:
-        raise ConfigError("input.combo_window_ms muss größer als 0 sein.")
     return Config(display=display, system=system, songs=songs, input=keyboard)

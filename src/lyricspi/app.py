@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
+from sys import platform
 from time import monotonic_ns
 
 import pygame
@@ -44,7 +45,7 @@ class AppState:
     def apply_action(self, action: Action, display: DisplayConfig) -> None:
         self.last_action = action
         previous_size = self.font_size
-        if action is Action.EXIT:
+        if action in (Action.EXIT, Action.SHUTDOWN):
             self.running = False
         elif action is Action.FONT_SMALLER:
             self.font_size = max(
@@ -97,9 +98,16 @@ def _draw(
 def _apply_keyboard_action(
     action: Action, state: AppState, display: DisplayConfig, renderer: Renderer
 ) -> bool:
+    shutdown_requested = action is Action.SHUTDOWN
+    if shutdown_requested and (platform == "win32" or state.development_mode):
+        action = Action.EXIT
     LOGGER.debug("Tastaturaktion: %s", action.name)
-    if action is Action.EXIT and not state.development_mode:
+    if action is Action.EXIT and not (
+        state.development_mode or shutdown_requested
+    ):
         return False
+    if action is Action.SHUTDOWN:
+        LOGGER.info("Shutdown angefordert. LyricsPi wird beendet.")
     song = state.song
     page_index = state.navigation.page_index
     font_size = state.font_size
@@ -143,7 +151,7 @@ def run(config: Config) -> None:
 
         while state.running:
             events = pygame.event.get()
-            now_ms = monotonic_ns() // 1_000_000
+            now_ms = monotonic_ns() / 1_000_000
             new_size = renderer.screen.get_size()
             redraw = new_size != size
             if redraw:
@@ -161,7 +169,11 @@ def run(config: Config) -> None:
             if not state.running:
                 break
             if keyboard is not None:
-                actions.extend(keyboard.poll(now_ms))
+                pressed = pygame.key.get_pressed()
+                shutdown_pressed = pressed[pygame.K_DOWN] and pygame.key.get_focused()
+                actions.extend(
+                    keyboard.poll(now_ms, shutdown_pressed=shutdown_pressed)
+                )
             for action in actions:
                 changed = _apply_keyboard_action(
                     action, state, config.display, renderer

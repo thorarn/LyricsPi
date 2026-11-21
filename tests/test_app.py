@@ -11,7 +11,6 @@ from lyricspi.app import AppState, run
 from lyricspi.config import (
     Config,
     DisplayConfig,
-    InputConfig,
     SongsConfig,
     SystemConfig,
 )
@@ -76,7 +75,7 @@ def test_song_draws_resizes_logs_navigation_and_exits(
 
     monkeypatch.setattr(pygame.event, "get", get_events)
     with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
-        run(Config(input=InputConfig(enable_combinations=False)))
+        run(Config())
 
     original, larger, second, restored = screens
     assert original.get_size() == (1280, 720)
@@ -250,7 +249,6 @@ def test_page_layout_follows_font_and_window_changes(
     run(Config(
         display=display,
         songs=SongsConfig(directory=str(tmp_path)),
-        input=InputConfig(enable_combinations=False),
     ))
 
     (
@@ -294,65 +292,87 @@ def test_renderer_keeps_all_glyphs_inside_content_area(
         pygame.quit()
 
 
-def test_default_hid_combinations_and_delayed_navigation_use_app_actions(
+def test_short_b_turns_page_and_logs_hid_events(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    (tmp_path / "1_Erstes_Lied.txt").write_text("Erstes Lied", encoding="utf-8")
-    (tmp_path / "2_Zweites_Lied.txt").write_text("Zweites Lied", encoding="utf-8")
+    path = tmp_path / "1_Lied.txt"
+    path.write_text("Erste Seite\nZweite Seite", encoding="utf-8")
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    up, down, left, right = pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT
-    press, release = pygame.KEYDOWN, pygame.KEYUP
-    now_ms = 0
-    steps = iter(
-        [
-            (0, [(press, up)]),
-            (80, [(press, left)]),
-            (100, [(release, up), (release, left)]),
-            (260, [(press, right)]),
-            (300, [(press, down)]),
-            (330, [(release, right), (release, down)]),
-            (500, [(press, right), (release, right)]),
-            (649, []),
-            (650, []),
-            (700, [(press, pygame.K_ESCAPE)]),
-        ]
+    batches = iter([
+        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_DOWN)],
+        [pygame.event.Event(pygame.KEYUP, key=pygame.K_DOWN)],
+        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
+    ])
+    times_ns = iter([0, 200_000_000, 300_000_000])
+    pressed = {pygame.K_DOWN: False}
+
+    def events() -> list[pygame.event.Event]:
+        batch = next(batches)
+        if batch[0].key == pygame.K_DOWN:
+            pressed[pygame.K_DOWN] = batch[0].type == pygame.KEYDOWN
+        return batch
+
+    monkeypatch.setattr(pygame.event, "get", events)
+    monkeypatch.setattr(pygame.key, "get_pressed", lambda: pressed)
+    monkeypatch.setattr(pygame.key, "get_focused", lambda: True)
+    monkeypatch.setattr(app, "monotonic_ns", lambda: next(times_ns))
+    display = DisplayConfig(window_height=160, line_spacing=150)
+    with caplog.at_level(logging.DEBUG, logger="lyricspi"):
+        run(Config(display=display, songs=SongsConfig(directory=str(tmp_path))))
+
+    assert [message for message in caplog.messages if message.startswith("Seite ")] == [
+        "Seite 1/2",
+        "Seite 2/2",
+    ]
+    assert "KEYDOWN Arrow Down." in caplog.messages
+    assert "KEYUP Arrow Down nach 200 ms. Aktion NEXT_PAGE." in caplog.messages
+
+
+@pytest.mark.parametrize(
+    "platform,development_mode,action",
+    [
+        ("win32", True, Action.EXIT),
+        ("win32", False, Action.EXIT),
+        ("linux", True, Action.EXIT),
+        ("linux", False, Action.SHUTDOWN),
+    ],
+)
+def test_long_b_exits_application_without_system_command(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    platform: str,
+    development_mode: bool,
+    action: Action,
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr(app, "platform", platform)
+    monkeypatch.setattr(pygame.key, "get_focused", lambda: True)
+    monkeypatch.setattr(pygame.key, "get_pressed", lambda: {
+        pygame.K_DOWN: True,
+    })
+    monkeypatch.setattr(
+        pygame.font, "SysFont", lambda names, size: pygame.font.Font(None, size)
     )
-    original_draw = Renderer.draw
-    frames: list[tuple[int, Page]] = []
+    system = Mock(side_effect=AssertionError("Unexpected OS command"))
+    monkeypatch.setattr("os.system", system)
+    monkeypatch.setattr("subprocess.Popen", system)
+    start = [
+        pygame.event.Event(pygame.KEYDOWN, key=pygame.K_DOWN),
+    ]
+    batches = iter([start, [], []])
+    times_ns = iter([0, 14_999_000_000, 15_000_000_000])
+    monkeypatch.setattr(pygame.event, "get", lambda: next(batches))
+    monkeypatch.setattr(app, "monotonic_ns", lambda: next(times_ns))
 
-    def capture(
-        renderer: Renderer, size: int, page: Page, notice: str | None
-    ) -> None:
-        original_draw(renderer, size, page, notice)
-        frames.append((size, page))
-
-    def get_events() -> list[pygame.event.Event]:
-        nonlocal now_ms
-        now_ms, events = next(steps)
-        return [
-            pygame.event.Event(event_type, key=key)
-            for event_type, key in events
-        ]
-
-    monkeypatch.setattr(Renderer, "draw", capture)
-    monkeypatch.setattr(pygame.event, "get", get_events)
-    monkeypatch.setattr(app, "monotonic_ns", lambda: now_ms * 1_000_000)
     with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
-        run(Config(songs=SongsConfig(directory=str(tmp_path))))
+        run(Config(system=SystemConfig(development_mode=development_mode)))
 
-    initial, smaller, restored, next_song = frames
-    assert initial == restored
-    assert smaller == (44, initial[1])
-    assert next_song[0] == 48
-    assert next_song[1] != initial[1]
+    assert next(times_ns, None) is None
     assert [
         record.getMessage() for record in caplog.records
         if record.getMessage().startswith("Tastaturaktion")
-    ] == [
-        "Tastaturaktion: FONT_SMALLER",
-        "Tastaturaktion: FONT_LARGER",
-        "Tastaturaktion: NEXT_SONG",
-        "Tastaturaktion: EXIT",
-    ]
+    ] == [f"Tastaturaktion: {action.name}"]
+    system.assert_not_called()
+    assert not pygame.display.get_init()

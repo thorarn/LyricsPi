@@ -167,26 +167,16 @@ def test_existing_config_uses_hid_defaults(tmp_path: Path) -> None:
     path = tmp_path / "existing.json"
     path.write_text('{"display": {"font_size": 52}}', encoding="utf-8")
 
-    assert load_config(path).input == InputConfig(150, True)
-
-
-def test_configures_hid_combinations(tmp_path: Path) -> None:
-    path = tmp_path / "input.json"
-    path.write_text(
-        '{"input": {"combo_window_ms": 220, "enable_combinations": false}}',
-        encoding="utf-8",
-    )
-
-    assert load_config(path).input == InputConfig(220, False)
+    assert load_config(path).input == InputConfig("down", 15000)
 
 
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("combo_window_ms", 0),
-        ("combo_window_ms", -5),
-        ("combo_window_ms", True),
-        ("enable_combinations", "false"),
+        ("shutdown_key", "left"),
+        ("shutdown_key", 2),
+        ("shutdown_hold_ms", 14999),
+        ("shutdown_hold_ms", True),
     ],
 )
 def test_invalid_hid_config_is_rejected(
@@ -197,3 +187,12 @@ def test_invalid_hid_config_is_rejected(
 
     with pytest.raises(ConfigError, match=rf"input\.{key}"):
         load_config(path)
+
+
+def test_configures_longer_shutdown_hold(tmp_path: Path) -> None:
+    path = tmp_path / "input.json"
+    path.write_text(
+        '{"input": {"shutdown_key": "down", "shutdown_hold_ms": 18000}}',
+        encoding="utf-8",
+    )
+    assert load_config(path).input == InputConfig("down", 18000)
