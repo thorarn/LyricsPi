@@ -5,11 +5,13 @@ umask 022
 prefix=/opt/lyricspi
 mountpoint=/media/lyricspi/USB
 unit=/etc/systemd/system/lyricspi.service
-mount_unit=/etc/systemd/system/media-lyricspi-USB.mount
+usb_unit=/etc/systemd/system/lyricspi-usb.service
+legacy_mount=/etc/systemd/system/media-lyricspi-USB.mount
 policy=/etc/polkit-1/rules.d/49-lyricspi-poweroff.rules
-system_files=("$unit" "$mount_unit" "$policy")
+system_files=("$unit" "$usb_unit" "$policy")
+backup_files=("${system_files[@]}")
+legacy_managed=0
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-usb_uuid=
 
 fail() {
     printf 'LyricsPi-Installation: %s\n' "$*" >&2
@@ -17,8 +19,8 @@ fail() {
 }
 
 usage() {
-    printf 'Aufruf: sudo bash deploy/install.sh [--usb-uuid XXXX-XXXX]\n'
-    printf 'Bei der Erstinstallation die FAT32-/exFAT-Dateisystem-UUID angeben.\n'
+    printf 'Aufruf: sudo bash deploy/install.sh\n'
+    printf 'FAT32-/exFAT-USB-Sticks werden beim Dienststart automatisch erkannt.\n'
 }
 
 check_platform() {
@@ -53,7 +55,8 @@ system_packages() {
         font_package=fonts-dejavu-core
     fi
     printf '%s\n' python3 python3-venv python3-pygame python3-setuptools \
-        python3-wheel "$font_package" kbd polkitd exfatprogs \
+        python3-wheel fontconfig "$font_package" kbd polkitd exfatprogs \
+        util-linux mount udev \
         libgbm1 libegl1 libegl-mesa0 libgl1-mesa-dri
 }
 
@@ -69,7 +72,7 @@ missing_packages() {
 deployment_matches() {
     local current=$1 staged=$2 target path
     shift 2
-    for path in src assets demo_songs config/config.example.json config/config.json README.md pyproject.toml; do
+    for path in src assets demo_songs deploy/usb_mount.py config/config.example.json config/config.json README.md pyproject.toml; do
         diff -qr --exclude=__pycache__ --exclude='*.egg-info' \
             "$current/$path" "$staged/app/$path" >/dev/null 2>&1 || return 1
     done
@@ -87,8 +90,6 @@ case $# in
     0) ;;
     1) [[ $1 == --help || $1 == -h ]] || fail "Unbekannte Option: $1"
        usage; exit 0 ;;
-    2) [[ $1 == --usb-uuid && -n $2 ]] || fail "Erwartet: --usb-uuid XXXX-XXXX"
-       usb_uuid=$2 ;;
     *) usage; exit 1 ;;
 esac
 
@@ -113,21 +114,20 @@ check_platform "$model" "$machine" "$architecture" "$bits" "$release"
 exec 9>/run/lock/lyricspi-install.lock
 flock -n 9 || fail "Eine LyricsPi-Installation läuft bereits."
 
-for path in "$prefix" "${system_files[@]}" "$prefix/config/config.json" /media/lyricspi "$mountpoint"; do
+for path in "$prefix" "${backup_files[@]}" "$prefix/config/config.json" /media/lyricspi "$mountpoint"; do
     [[ ! -L "$path" ]] || fail "Unerwarteter symbolischer Link: $path"
 done
 [[ ! -e "$prefix" || -d "$prefix" ]] || fail "$prefix ist kein Verzeichnis."
 [[ "$source_dir" != "$prefix" && "$source_dir" != "$prefix/"* ]] ||
     fail "Das Skript aus einem separaten Git-Checkout ausführen."
 [[ -f "$source_dir/pyproject.toml" ]] || fail "Projektdateien fehlen in $source_dir."
-if [[ -z "$usb_uuid" && -f "$mount_unit" ]] &&
-    grep -qx '# Verwaltet durch LyricsPi deploy/install.sh' "$mount_unit"; then
-    usb_uuid=$(sed -n 's|^What=/dev/disk/by-uuid/||p' "$mount_unit")
+if [[ -f "$legacy_mount" && ! -L "$legacy_mount" ]] &&
+    grep -qx '# Verwaltet durch LyricsPi deploy/install.sh' "$legacy_mount"; then
+    backup_files+=("$legacy_mount")
+    legacy_managed=1
 fi
-[[ "$usb_uuid" =~ ^[[:xdigit:]]{4}-[[:xdigit:]]{4}$ ]] ||
-    fail "Eine FAT32-/exFAT-Dateisystem-UUID angeben (lsblk -o NAME,TRAN,FSTYPE,UUID)."
 if findmnt --fstab --mountpoint "$mountpoint" >/dev/null; then
-    fail "Für $mountpoint existiert bereits ein fstab-Eintrag."
+    printf 'Vorhandener fstab-Eintrag für %s bleibt erhalten.\n' "$mountpoint"
 fi
 
 mapfile -t packages < <(system_packages "$release")
@@ -166,7 +166,7 @@ cleanup() {
     if (( status != 0 && replacing )); then
         printf 'Installation fehlgeschlagen. Stelle die vorherige Installation wieder her.\n' >&2
         set +e
-        for path in "${system_files[@]}"; do
+        for path in "${backup_files[@]}"; do
             if [[ -f "$backup/${path##*/}" ]]; then
                 cp -a -- "$backup/${path##*/}" "$path"
             else
@@ -192,13 +192,14 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-install -d -m 0755 "$stage/app" "$stage/app/config" "$stage/app/assets"
+install -d -m 0755 "$stage/app" "$stage/app/config" "$stage/app/assets" "$stage/app/deploy"
 cp -R -- "$source_dir"/{src,demo_songs} "$stage/app/"
 if [[ -d "$source_dir/assets" ]]; then
     cp -R -- "$source_dir/assets/." "$stage/app/assets/"
 fi
 install -m 0644 "$source_dir/pyproject.toml" "$source_dir/README.md" "$stage/app/"
 install -m 0644 "$source_dir/config/config.example.json" "$stage/app/config/"
+install -m 0644 "$source_dir/deploy/usb_mount.py" "$stage/app/deploy/"
 local_config="$prefix/config/config.json"
 if [[ -f "$local_config" ]]; then
     install -o root -g lyricspi -m 0640 "$local_config" "$stage/app/config/config.json"
@@ -220,21 +221,6 @@ PY
     chown root:lyricspi "$stage/app/config/config.json"
     chmod 0640 "$stage/app/config/config.json"
 fi
-
-cat >"$stage/media-lyricspi-USB.mount" <<EOF
-# Verwaltet durch LyricsPi deploy/install.sh
-[Unit]
-Description=LyricsPi Songtexte (nur lesend)
-PartOf=lyricspi.service
-JobTimeoutSec=10s
-
-[Mount]
-What=/dev/disk/by-uuid/$usb_uuid
-Where=$mountpoint
-Type=auto
-Options=ro,nosuid,nodev,noexec,umask=0222
-TimeoutSec=5s
-EOF
 
 cat >"$stage/49-lyricspi-poweroff.rules" <<'POLKIT'
 polkit.addRule(function(action, subject) {
@@ -288,8 +274,9 @@ PY
 }
 
 python="$prefix/.venv/bin/python"
-install -m 0644 "$source_dir/deploy/lyricspi.service" "$stage/lyricspi.service"
-if [[ -x "$python" ]] && deployment_matches "$prefix" "$stage" "${system_files[@]}" &&
+install -m 0644 "$source_dir"/deploy/{lyricspi,lyricspi-usb}.service "$stage/"
+if [[ -x "$python" ]] && (( ! legacy_managed )) &&
+    deployment_matches "$prefix" "$stage" "${system_files[@]}" &&
     verify_installation; then
     if ! systemctl is-enabled --quiet lyricspi.service; then
         systemctl enable lyricspi.service
@@ -299,7 +286,7 @@ if [[ -x "$python" ]] && deployment_matches "$prefix" "$stage" "${system_files[@
 fi
 
 backup=$(mktemp -d /opt/.lyricspi-backup.XXXXXXXX)
-for path in "${system_files[@]}"; do
+for path in "${backup_files[@]}"; do
     if [[ -e "$path" ]]; then
         cp -a -- "$path" "$backup/"
     fi
@@ -308,13 +295,11 @@ if systemctl is-active --quiet lyricspi.service; then
     was_active=1
     systemctl stop lyricspi.service
 fi
-if findmnt --mountpoint "$mountpoint" >/dev/null; then
-    if (( was_active )); then
-        systemctl start lyricspi.service
-    fi
-    fail "$mountpoint ist noch eingehängt. Erst den vorhandenen Mount aushängen."
-fi
 replacing=1
+if (( legacy_managed )); then
+    systemctl stop "${legacy_mount##*/}"
+    rm -- "$legacy_mount"
+fi
 if [[ -d "$prefix" ]]; then
     mv -T -- "$prefix" "$backup/app"
 fi
@@ -325,13 +310,13 @@ mv -T -- "$stage/app" "$prefix"
     --no-deps -e "$prefix" || fail "LyricsPi konnte nicht in der Python-venv installiert werden."
 verify_installation || fail "Die Installation hat die Python-/Pygame-/SDL2-Prüfung nicht bestanden."
 install -m 0644 "$stage/lyricspi.service" "$unit"
-install -m 0644 "$stage/media-lyricspi-USB.mount" "$mount_unit"
+install -m 0644 "$stage/lyricspi-usb.service" "$usb_unit"
 install -m 0644 "$stage/49-lyricspi-poweroff.rules" "$policy"
-systemd-analyze verify "$unit" "$mount_unit"
+systemd-analyze verify "$unit" "$usb_unit"
 systemctl daemon-reload
 systemctl enable lyricspi.service
 replacing=0
 
 printf 'Installation abgeschlossen. Sicherung: %s\n' "$backup"
 printf 'Dienst starten: sudo systemctl start lyricspi.service\n'
-printf 'Journal verfolgen: journalctl -u lyricspi.service -u media-lyricspi-USB.mount -f\n'
+printf 'Journal verfolgen: journalctl -u lyricspi.service -u lyricspi-usb.service -f\n'

@@ -59,27 +59,19 @@ cd "$HOME/LyricsPi"
 `DEINE_GIT_URL` durch die HTTPS- oder SSH-Clone-URL des Projekts ersetzen.
 Der Checkout dient der Wartung. Der Dienst startet aus `/opt/lyricspi`.
 
-Einen FAT32- oder exFAT-formatierten Stick verwenden, die nummerierten
-UTF-8-TXT-Dateien in sein Wurzelverzeichnis kopieren und den Stick einstecken.
-Die Dateisystem-UUID der Partition ermitteln.
-
-```bash
-lsblk -o NAME,TRAN,FSTYPE,UUID,MOUNTPOINTS
-```
-
-Die UUID aus der Spalte `UUID` übernehmen, etwa `1234-ABCD`. Jeder verwendete
-Datenträger braucht eine eigene UUID. Bei mehreren angeschlossenen Sticks
-bestimmt diese UUID die Songquelle. Falls ein anderer Dienst den Stick
-bereits eingehängt hat, diesen Mount vor der Installation aushängen.
+Einen FAT32- oder exFAT-formatierten Stick verwenden und die nummerierten
+UTF-8-TXT-Dateien in sein Wurzelverzeichnis kopieren. Der Stick kann
+bei der Installation abgezogen bleiben.
 
 ## 3. Installieren und starten
 
 ```bash
-sudo bash deploy/install.sh --usb-uuid 1234-ABCD
-sudo systemctl start lyricspi.service
-sudo systemctl status lyricspi.service
-sudo journalctl -b -u lyricspi.service -u media-lyricspi-USB.mount
+sudo bash deploy/install.sh
 ```
+
+Jetzt den Song-Stick einstecken und den Raspberry Pi mit `sudo reboot`
+neu starten. LyricsPi startet automatisch. Für einen Start ohne Neustart
+kannst du `sudo systemctl start lyricspi.service` verwenden.
 
 Der Installer installiert fehlende Systempakete per APT. Er prüft die
 System-Python-Version (mindestens 3.11) und verwendet `python3-pygame`
@@ -87,12 +79,13 @@ samt SDL2 aus derselben Distribution. LyricsPi wird offline in eine venv
 mit Zugriff auf diese Systempakete installiert. Die Prüfung zeigt die
 Pygame- und SDL-Version und kontrolliert, ob SDL KMSDRM anbietet.
 Bookworm liefert DejaVu Sans Mono über `fonts-dejavu-core`. Auf Trixie
-kommt sie aus `fonts-dejavu-mono`. Der Windows-Entwicklungsmodus verwendet
+kommt sie aus `fonts-dejavu-mono`. Pygame findet die Schrift über
+`fontconfig`. Der Windows-Entwicklungsmodus verwendet
 weiterhin Python 3.13 und Pygame ab 2.6.1.
 [Bookworm-setuptools](https://packages.debian.org/bookworm/armhf/python3-setuptools) · [Bookworm-Schriftpaket](https://packages.debian.org/bookworm/all/fonts-dejavu-core/filelist)
 
 - [deploy/install.sh](../deploy/install.sh) installiert Anwendung, venv,
-  Produktionskonfiguration, Systembenutzer, Service, Mount-Unit und
+  Produktionskonfiguration, Systembenutzer, beide Dienste und
   Polkit-Regel. Vor einem Update sichert es eine vorhandene Installation
   und die von ihm verwendeten Systemdateien in `/opt/.lyricspi-backup.*`.
 - [deploy/lyricspi.service](../deploy/lyricspi.service) startet LyricsPi als
@@ -100,16 +93,27 @@ weiterhin Python 3.13 und Pygame ab 2.6.1.
   `input` erlauben DRM/Grafik und Linux-Eingabe. systemd stellt die Konsole
   bereit. Zwei feste Startbefehle wechseln auf Konsole 7 und deaktivieren
   dort das Ausblenden. Python und der Renderer laufen als `lyricspi`.
-- `media-lyricspi-USB.mount` hängt die konfigurierte UUID unter
-  `/media/lyricspi/USB` mit `ro,nosuid,nodev,noexec` ein. Der Dienst wartet
-  höchstens zehn Sekunden auf den Mount-Job. Bei fehlendem Stick startet
-  LyricsPi trotzdem und zeigt `USB-Stick einstecken.`.
+- [lyricspi-usb.service](../deploy/lyricspi-usb.service) sucht beim Start
+  kurz nach einem USB-Massenspeicher mit FAT32 oder exFAT. Der Hilfsdienst
+  schließt Systemlaufwerke und erkannte SD-Karten aus. Er prüft Geräte in
+  alphabetischer Reihenfolge und Partitionen innerhalb eines Geräts
+  numerisch. Der erste geeignete Datenträger wird unter
+  `/media/lyricspi/USB` mit `ro,nosuid,nodev,noexec` eingehängt.
+  Der Hilfsdienst hat ein Startlimit von zwölf Sekunden pro Aufruf.
+  Fehlt der Stick oder schlägt der Mount fehl, zeigt LyricsPi
+  `USB-Stick einstecken.`.
 - `49-lyricspi-poweroff.rules` erlaubt dem Dienstkonto den regulären
   logind-Poweroff auch bei weiteren aktiven Sitzungen. Eine Berechtigung
   zum Übergehen von Shutdown-Inhibitoren wird dafür nicht erteilt.
 
-Der Installer aktiviert den Autostart für den nächsten Boot. Der erste
-manuelle Start erfolgt mit dem oben gezeigten Befehl. Ein unerwarteter
+Ein geeigneter und bereits schreibgeschützter Mount am Ziel kann
+wiederverwendet werden. Andere vorhandene Mounts werden übersprungen.
+Beim Stopp hängt der Helfer nur selbst erzeugte Mounts aus. USB-Kartenleser,
+die sich lediglich als generischer USB-Massenspeicher melden, lassen sich
+anhand dieser Angaben nicht von einem USB-Stick unterscheiden. Verwende
+einen einzelnen Song-Stick.
+
+Der Installer aktiviert den Autostart für den nächsten Boot. Ein unerwarteter
 Absturz führt zu einem Neustart nach fünf Sekunden, mit höchstens drei
 Starts in zwei Minuten. Für einen erneuten Start nach einem behobenen
 Fehler kann der Zähler zurückgesetzt werden.
@@ -122,7 +126,7 @@ Sicherung und der explizite Start nach dem Update.
 ```bash
 sudo systemctl reset-failed lyricspi.service
 sudo systemctl restart lyricspi.service
-sudo journalctl -u lyricspi.service -u media-lyricspi-USB.mount -f
+sudo journalctl -u lyricspi.service -u lyricspi-usb.service -f
 ```
 
 Die lokale Konfiguration steht in `/opt/lyricspi/config/config.json` und
@@ -168,7 +172,8 @@ diesem Gerät nicht verfügbar.
 ## 5. HDMI- und Eingabediagnose
 
 ```bash
-sudo journalctl -b -u lyricspi.service -u media-lyricspi-USB.mount
+sudo journalctl -b -u lyricspi.service -u lyricspi-usb.service
+lsblk -o NAME,TRAN,FSTYPE,MOUNTPOINTS
 ls -l /dev/dri /dev/input
 id lyricspi
 grep -H . /sys/class/drm/card*-*/status
@@ -231,9 +236,9 @@ die DRM-Connector-Diagnose oben verwenden.
 ## 6. Aktualisieren oder zurückbauen
 
 Ein Update außerhalb eines Auftritts aus dem separaten Checkout starten.
-Der Installer übernimmt bei einem Update die bisherige UUID, falls keine
-neue angegeben wurde. Nach einem erfolgreichen Update den Dienst explizit
-starten und HDMI, Eingabe und USB erneut prüfen.
+Der Installer sichert eine von LyricsPi erzeugte frühere UUID-Mount-Unit
+und ersetzt sie durch den USB-Hilfsdienst. Nach einem erfolgreichen Update
+den Dienst explizit starten und HDMI, Eingabe und USB erneut prüfen.
 
 ```bash
 cd "$HOME/LyricsPi"
@@ -250,9 +255,9 @@ Overrides separat mit `systemctl cat lyricspi.service` prüfen.
 
 ```bash
 sudo systemctl disable --now lyricspi.service
-sudo systemctl stop media-lyricspi-USB.mount
+sudo systemctl stop lyricspi-usb.service
 sudo rm /etc/systemd/system/lyricspi.service \
-  /etc/systemd/system/media-lyricspi-USB.mount \
+  /etc/systemd/system/lyricspi-usb.service \
   /etc/polkit-1/rules.d/49-lyricspi-poweroff.rules
 sudo systemctl daemon-reload
 sudo mv /opt/lyricspi "/opt/lyricspi.uninstalled.$(date +%Y%m%d-%H%M%S)"

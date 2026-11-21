@@ -1,7 +1,7 @@
 [Unit]
 Description=LyricsPi Songtext-Prompter
-Wants=media-lyricspi-USB.mount
-After=media-lyricspi-USB.mount systemd-logind.service systemd-user-sessions.service
+Wants=lyricspi-usb.service
+After=lyricspi-usb.service systemd-logind.service systemd-user-sessions.service
 StartLimitIntervalSec=120s
 StartLimitBurst=3
 
@@ -16,6 +16,9 @@ Environment=SDL_VIDEODRIVER=kmsdrm
 Environment=TERM=linux
 Environment=PYGAME_HIDE_SUPPORT_PROMPT=1
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=LYRICSPI_USB_READY=0
+Environment=LYRICSPI_USB_MOUNTPOINT=/media/lyricspi/USB
+EnvironmentFile=-/run/lyricspi-usb/ready.env
 StandardInput=tty-fail
 StandardOutput=journal
 StandardError=journal

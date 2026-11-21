@@ -171,8 +171,11 @@ meldet. Bei mehreren Kandidaten bittet LyricsPi darum, nur einen
 anzuschließen. Für ein USB-Laufwerk, das Windows als festes Laufwerk
 einstuft, kann dessen Laufwerkswurzel explizit mit `directory` gewählt werden.
 
-Unter Linux verwendet `usb` den konfigurierten, bereits eingehängten
-Mount-Punkt. Trage dort den tatsächlichen Mount-Pfad des Sticks ein.
+Auf dem Raspberry Pi erkennt der installierte systemd-Hilfsdienst den
+ersten geeigneten FAT32- oder exFAT-USB-Stick und bindet ihn nur lesend
+unter `/media/lyricspi/USB` ein. Ein Dienstneustart prüft den Stick erneut.
+Bei einem direkten Linux-Start außerhalb des Dienstes kann ein bereits
+eingehängter Ordner über die Konfiguration angegeben werden.
 
 ```json
 {
@@ -203,6 +206,11 @@ Die HID-Tests verwenden simulierte Tastaturereignisse und Zeitpunkte.
 Die Installertests verwenden Bash, unter Windows beispielsweise Git Bash.
 
 ## Raspberry Pi 2 und 3
+
+1. Raspberry Pi OS Lite 32 Bit installieren.
+2. Im Repository `sudo bash deploy/install.sh` ausführen.
+3. Einen FAT32- oder exFAT-USB-Stick mit den Songtexten einstecken.
+4. Den Raspberry Pi neu starten. LyricsPi startet automatisch.
 
 Die [Installationsanleitung](docs/raspberry-pi-installation.md) beschreibt
 Raspberry Pi OS Lite, HDMI über DRM/KMS, den schreibgeschützten USB-Mount,

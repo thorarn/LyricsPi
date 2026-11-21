@@ -1,0 +1,18 @@
+[Unit]
+Description=LyricsPi USB-Songquelle
+After=systemd-udevd.service
+PartOf=lyricspi.service
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=/usr/bin:/bin
+RuntimeDirectory=lyricspi-usb
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 -I -B /opt/lyricspi/deploy/usb_mount.py start
+ExecStopPost=/usr/bin/python3 -I -B /opt/lyricspi/deploy/usb_mount.py stop
+TimeoutStartSec=12s
+TimeoutStopSec=5s
+CapabilityBoundingSet=CAP_SYS_ADMIN
+NoNewPrivileges=yes

@@ -2,13 +2,15 @@
 
 import argparse
 import logging
+import os
 import platform
 import signal
+from dataclasses import replace
 from importlib.metadata import version
 from pathlib import Path
 from types import FrameType
 
-from .config import DEFAULT_CONFIG_PATH, ConfigError, load_config
+from .config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
 
 
 LOGGER = logging.getLogger("lyricspi")
@@ -16,6 +18,17 @@ LOGGER = logging.getLogger("lyricspi")
 
 def _stop_service(_signal: int, _frame: FrameType | None) -> None:
     raise SystemExit(0)
+
+
+def _managed_usb_config(config: Config) -> Config:
+    mountpoint = os.environ.get("LYRICSPI_USB_MOUNTPOINT")
+    if mountpoint is None or config.songs.source_mode != "usb":
+        return config
+    ready = os.environ.get("LYRICSPI_USB_READY") == "1"
+    return replace(
+        config,
+        songs=replace(config.songs, linux_mount_path=mountpoint if ready else ""),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
             "Betriebssystem: %s, Python: %s", os_name, platform.python_version()
         )
         config = load_config(args.config)
+        if platform.system() == "Linux":
+            config = _managed_usb_config(config)
         LOGGER.setLevel(
             logging.DEBUG if config.system.development_mode else logging.INFO
         )

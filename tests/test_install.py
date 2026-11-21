@@ -98,7 +98,10 @@ def test_armhf_package_profiles(bash: str, release: str, font: str) -> None:
     result = shell(bash, 'system_packages "$@"', release)
     assert result.returncode == 0, result.stderr
     packages = set(result.stdout.splitlines())
-    assert {"python3", "python3-pygame", "python3-venv", "python3-setuptools", font} <= packages
+    assert {
+        "python3", "python3-pygame", "python3-venv", "python3-setuptools",
+        "fontconfig", font,
+    } <= packages
     assert {name for name in packages if name.startswith("fonts-")} == {font}
 
 
@@ -117,10 +120,13 @@ def test_identical_deployment_can_be_reused(bash: str, tmp_path: Path) -> None:
     current = tmp_path / "current"
     staged = tmp_path / "staged"
     for directory in (current, staged / "app"):
-        for folder in ("src", "assets", "demo_songs", "config"):
+        for folder in ("src", "assets", "demo_songs", "config", "deploy"):
             (directory / folder).mkdir(parents=True)
         for name in ("README.md", "pyproject.toml", "config/config.example.json", "config/config.json"):
             (directory / name).write_text("same", encoding="utf-8")
+        (directory / "deploy" / "usb_mount.py").write_text(
+            "same helper", encoding="utf-8"
+        )
     (current / "src" / "__pycache__").mkdir()
     unit = current / "lyricspi.service"
     unit.write_text("same unit", encoding="utf-8")
@@ -131,4 +137,9 @@ def test_identical_deployment_can_be_reused(bash: str, tmp_path: Path) -> None:
     identical = shell(bash, 'deployment_matches "$@"', *args)
     assert identical.returncode == 0, identical.stderr
     staged_unit.write_text("changed unit", encoding="utf-8")
+    assert shell(bash, 'deployment_matches "$@"', *args).returncode == 1
+    staged_unit.write_text("same unit", encoding="utf-8")
+    (staged / "app" / "deploy" / "usb_mount.py").write_text(
+        "changed helper", encoding="utf-8"
+    )
     assert shell(bash, 'deployment_matches "$@"', *args).returncode == 1
