@@ -69,9 +69,9 @@ bei der Installation abgezogen bleiben.
 sudo bash deploy/install.sh
 ```
 
-Jetzt den Song-Stick einstecken und den Raspberry Pi mit `sudo reboot`
-neu starten. LyricsPi startet automatisch. Für einen Start ohne Neustart
-kannst du `sudo systemctl start lyricspi.service` verwenden.
+Der Installer startet LyricsPi sofort und aktiviert den Autostart.
+Wenn der Song-Stick erst danach eingesteckt wird, lädt ihn
+`sudo systemctl restart lyricspi.service` oder ein Neustart des Pi.
 
 Der Installer installiert fehlende Systempakete per APT. Er prüft die
 System-Python-Version (mindestens 3.11) und verwendet `python3-pygame`
@@ -121,10 +121,11 @@ Absturz führt zu einem Neustart nach fünf Sekunden, mit höchstens drei
 Starts in zwei Minuten. Für einen erneuten Start nach einem behobenen
 Fehler kann der Zähler zurückgesetzt werden.
 
-Bei einem identischen Deployment mit funktionsfähiger venv und vorhandenen
-Systempaketen überspringt der Installer APT und die Neuinstallation. Der
-laufende Dienst bleibt dabei aktiv. Bei Änderungen gelten weiterhin die
-Sicherung und der explizite Start nach dem Update.
+Bei jedem erfolgreichen Installationslauf kopiert der Installer beide
+systemd-Units, lädt systemd neu und startet den Dienst neu. Bei einer
+aktuellen Anwendung mit funktionsfähiger venv und vorhandenen Systempaketen
+entfallen APT und die Python-Neuinstallation. Bei Anwendungsupdates werden
+die vorhandene venv und die lokale JSON-Konfiguration übernommen.
 
 ```bash
 sudo systemctl reset-failed lyricspi.service
@@ -197,9 +198,8 @@ Environment=SDL_VIDEO_GL_DRIVER=libGLESv2.so.2
 
 Die Werte gelten nur für den LyricsPi-Dienst. Bei einer Neuinstallation
 oder beim Aktualisieren mit `sudo bash deploy/install.sh` übernimmt der
-Installer die Unit nach `/etc/systemd/system/lyricspi.service` und führt bei
-einem Update der Unit `systemctl daemon-reload` aus. Danach mit
-`sudo systemctl restart lyricspi.service` starten. Mit
+Installer die Unit nach `/etc/systemd/system/lyricspi.service`, führt
+`systemctl daemon-reload` aus und startet den Dienst neu. Mit
 `systemctl cat lyricspi.service` lassen sich die installierte Unit und
 eventuelle lokale Drop-ins prüfen.
 
@@ -342,14 +342,13 @@ die DRM-Connector-Diagnose oben verwenden.
 
 Ein Update außerhalb eines Auftritts aus dem separaten Checkout starten.
 Der Installer sichert eine von LyricsPi erzeugte frühere UUID-Mount-Unit
-und ersetzt sie durch den USB-Hilfsdienst. Nach einem erfolgreichen Update
-den Dienst explizit starten und HDMI, Eingabe und USB erneut prüfen.
+und ersetzt sie durch den USB-Hilfsdienst. Nach dem automatischen Neustart
+HDMI, Eingabe und USB erneut prüfen.
 
 ```bash
 cd "$HOME/LyricsPi"
 git pull --ff-only
 sudo bash deploy/install.sh
-sudo systemctl restart lyricspi.service
 sudo systemctl status lyricspi.service
 ```
 

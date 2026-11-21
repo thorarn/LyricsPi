@@ -69,16 +69,22 @@ missing_packages() {
     done
 }
 
-deployment_matches() {
-    local current=$1 staged=$2 target path
-    shift 2
+application_matches() {
+    local current=$1 staged=$2 path
     for path in src assets demo_songs deploy/usb_mount.py tools/graphics_diagnostic.py config/config.example.json config/config.json README.md pyproject.toml; do
         diff -qr --exclude=__pycache__ --exclude='*.egg-info' \
             "$current/$path" "$staged/app/$path" >/dev/null 2>&1 || return 1
     done
-    for target in "$@"; do
-        cmp -s -- "$target" "$staged/${target##*/}" || return 1
-    done
+}
+
+install_systemd_units() {
+    local staged=$1 main_unit=$2 helper_unit=$3
+    install -m 0644 "$staged/lyricspi.service" "$main_unit"
+    install -m 0644 "$staged/lyricspi-usb.service" "$helper_unit"
+    systemd-analyze verify "$main_unit" "$helper_unit"
+    systemctl daemon-reload
+    systemctl enable lyricspi.service
+    systemctl restart lyricspi.service
 }
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -114,7 +120,7 @@ check_platform "$model" "$machine" "$architecture" "$bits" "$release"
 exec 9>/run/lock/lyricspi-install.lock
 flock -n 9 || fail "Eine LyricsPi-Installation läuft bereits."
 
-for path in "$prefix" "${backup_files[@]}" "$prefix/config/config.json" /media/lyricspi "$mountpoint"; do
+for path in "$prefix" "${backup_files[@]}" "$prefix/.venv" "$prefix/config/config.json" /media/lyricspi "$mountpoint"; do
     [[ ! -L "$path" ]] || fail "Unerwarteter symbolischer Link: $path"
 done
 [[ ! -e "$prefix" || -d "$prefix" ]] || fail "$prefix ist kein Verzeichnis."
@@ -160,12 +166,20 @@ stage=$(mktemp -d /opt/.lyricspi-stage.XXXXXXXX)
 backup=
 replacing=0
 was_active=0
+was_enabled=0
+activation_started=0
 cleanup() {
     local status=$?
     trap - EXIT
     if (( status != 0 && replacing )); then
         printf 'Installation fehlgeschlagen. Stelle die vorherige Installation wieder her.\n' >&2
         set +e
+        if (( activation_started )); then
+            systemctl stop lyricspi.service
+            if (( ! was_enabled )); then
+                systemctl disable lyricspi.service
+            fi
+        fi
         for path in "${backup_files[@]}"; do
             if [[ -f "$backup/${path##*/}" ]]; then
                 cp -a -- "$backup/${path##*/}" "$path"
@@ -203,7 +217,7 @@ install -m 0644 "$source_dir/deploy/usb_mount.py" "$stage/app/deploy/"
 install -m 0644 "$source_dir/tools/graphics_diagnostic.py" "$stage/app/tools/"
 local_config="$prefix/config/config.json"
 if [[ -f "$local_config" ]]; then
-    install -o root -g lyricspi -m 0640 "$local_config" "$stage/app/config/config.json"
+    cp -a -- "$local_config" "$stage/app/config/config.json"
 else
     /usr/bin/python3 - "$stage/app/config" "$mountpoint" <<'PY'
 import json
@@ -281,14 +295,11 @@ PY
 
 python="$prefix/.venv/bin/python"
 install -m 0644 "$source_dir"/deploy/{lyricspi,lyricspi-usb}.service "$stage/"
-if [[ -x "$python" ]] && (( ! legacy_managed )) &&
-    deployment_matches "$prefix" "$stage" "${system_files[@]}" &&
+reuse_application=0
+if [[ -x "$python" ]] && application_matches "$prefix" "$stage" &&
     verify_installation; then
-    if ! systemctl is-enabled --quiet lyricspi.service; then
-        systemctl enable lyricspi.service
-    fi
-    printf 'LyricsPi ist bereits aktuell. Installation und laufender Dienst bleiben erhalten.\n'
-    exit 0
+    reuse_application=1
+    printf 'LyricsPi ist bereits aktuell. Aktualisiere die systemd-Units.\n'
 fi
 
 backup=$(mktemp -d /opt/.lyricspi-backup.XXXXXXXX)
@@ -299,30 +310,39 @@ for path in "${backup_files[@]}"; do
 done
 if systemctl is-active --quiet lyricspi.service; then
     was_active=1
-    systemctl stop lyricspi.service
+fi
+if systemctl is-enabled --quiet lyricspi.service; then
+    was_enabled=1
 fi
 replacing=1
+if (( was_active && (! reuse_application || legacy_managed) )); then
+    systemctl stop lyricspi.service
+fi
 if (( legacy_managed )); then
     systemctl stop "${legacy_mount##*/}"
     rm -- "$legacy_mount"
 fi
-if [[ -d "$prefix" ]]; then
-    mv -T -- "$prefix" "$backup/app"
+if (( ! reuse_application )); then
+    if [[ -d "$prefix" ]]; then
+        mv -T -- "$prefix" "$backup/app"
+    fi
+    mv -T -- "$stage/app" "$prefix"
+    if [[ -d "$backup/app/.venv" ]]; then
+        cp -a --reflink=auto -- "$backup/app/.venv" "$prefix/.venv"
+    fi
+    if [[ ! -x "$python" ]]; then
+        /usr/bin/python3 -m venv --system-site-packages "$prefix/.venv" ||
+            fail "Die Python-venv konnte nicht erstellt werden."
+    fi
+    "$python" -m pip --disable-pip-version-check install --no-index --no-build-isolation \
+        --no-deps -e "$prefix" || fail "LyricsPi konnte nicht in der Python-venv installiert werden."
+    verify_installation || fail "Die Installation hat die Python-/Pygame-/SDL2-Prüfung nicht bestanden."
 fi
-mv -T -- "$stage/app" "$prefix"
-/usr/bin/python3 -m venv --system-site-packages "$prefix/.venv" ||
-    fail "Die Python-venv konnte nicht erstellt werden."
-"$python" -m pip --disable-pip-version-check install --no-index --no-build-isolation \
-    --no-deps -e "$prefix" || fail "LyricsPi konnte nicht in der Python-venv installiert werden."
-verify_installation || fail "Die Installation hat die Python-/Pygame-/SDL2-Prüfung nicht bestanden."
-install -m 0644 "$stage/lyricspi.service" "$unit"
-install -m 0644 "$stage/lyricspi-usb.service" "$usb_unit"
 install -m 0644 "$stage/49-lyricspi-poweroff.rules" "$policy"
-systemd-analyze verify "$unit" "$usb_unit"
-systemctl daemon-reload
-systemctl enable lyricspi.service
+activation_started=1
+install_systemd_units "$stage" "$unit" "$usb_unit"
 replacing=0
 
 printf 'Installation abgeschlossen. Sicherung: %s\n' "$backup"
-printf 'Dienst starten: sudo systemctl start lyricspi.service\n'
+printf 'LyricsPi-Dienst neu gestartet.\n'
 printf 'Journal verfolgen: journalctl -u lyricspi.service -u lyricspi-usb.service -f\n'

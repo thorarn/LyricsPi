@@ -130,7 +130,9 @@ def test_production_service_sets_kmsdrm_and_egl_libraries() -> None:
     ]
 
 
-def test_identical_deployment_can_be_reused(bash: str, tmp_path: Path) -> None:
+def test_application_reuse_is_independent_of_installed_units(
+    bash: str, tmp_path: Path
+) -> None:
     current = tmp_path / "current"
     staged = tmp_path / "staged"
     for directory in (current, staged / "app"):
@@ -150,18 +152,60 @@ def test_identical_deployment_can_be_reused(bash: str, tmp_path: Path) -> None:
     unit.write_text(unit_text, encoding="utf-8")
     staged_unit = staged / unit.name
     staged_unit.write_text(unit_text, encoding="utf-8")
-    args = (current.as_posix(), staged.as_posix(), unit.as_posix())
+    args = (current.as_posix(), staged.as_posix())
 
-    identical = shell(bash, 'deployment_matches "$@"', *args)
+    identical = shell(bash, 'application_matches "$@"', *args)
     assert identical.returncode == 0, identical.stderr
     old_unit = "".join(
         line for line in unit_text.splitlines(keepends=True)
         if not line.startswith(("Environment=SDL_VIDEO_EGL_DRIVER=", "Environment=SDL_VIDEO_GL_DRIVER="))
     )
     unit.write_text(old_unit, encoding="utf-8")
-    assert shell(bash, 'deployment_matches "$@"', *args).returncode == 1
-    unit.write_text(unit_text, encoding="utf-8")
+    assert shell(bash, 'application_matches "$@"', *args).returncode == 0
     (staged / "app" / "deploy" / "usb_mount.py").write_text(
         "changed helper", encoding="utf-8"
     )
-    assert shell(bash, 'deployment_matches "$@"', *args).returncode == 1
+    assert shell(bash, 'application_matches "$@"', *args).returncode == 1
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_installs_both_units_and_restarts_in_order(
+    bash: str, tmp_path: Path, existing: bool
+) -> None:
+    stage = ROOT / "deploy"
+    main_unit = tmp_path / "lyricspi.service"
+    helper_unit = tmp_path / "lyricspi-usb.service"
+    if existing:
+        for unit in (main_unit, helper_unit):
+            unit.write_text("old unit", encoding="utf-8")
+
+    command = (
+        'systemd-analyze() { printf "%s\\n" "$1"; }; '
+        'systemctl() { printf "%s\\n" "$*"; }; install_systemd_units "$@"'
+    )
+    args = (stage.as_posix(), main_unit.as_posix(), helper_unit.as_posix())
+    for _ in range(2):
+        result = shell(bash, command, *args)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            "verify", "daemon-reload", "enable lyricspi.service",
+            "restart lyricspi.service",
+        ]
+        for unit in (main_unit, helper_unit):
+            assert unit.read_bytes() == (stage / unit.name).read_bytes()
+
+
+def test_does_not_activate_units_after_failed_verification(
+    bash: str, tmp_path: Path
+) -> None:
+    result = shell(
+        bash,
+        'systemd-analyze() { return 1; }; '
+        'systemctl() { printf "unexpected activation\\n"; }; '
+        'install_systemd_units "$@"',
+        (ROOT / "deploy").as_posix(),
+        (tmp_path / "lyricspi.service").as_posix(),
+        (tmp_path / "lyricspi-usb.service").as_posix(),
+    )
+    assert result.returncode == 1
+    assert "unexpected activation" not in result.stdout
