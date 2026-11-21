@@ -1,4 +1,4 @@
-"""Initialize the Pygame display and draw the M1 demo text."""
+"""Initialize the Pygame display and draw the demo and startup notices."""
 
 import logging
 
@@ -43,11 +43,12 @@ class Renderer:
         self.margin_y = height * config.margin_percent // 100
         self.text_width = width - 2 * self.margin_x
 
-    def draw(self, font_size: int) -> None:
+    def draw(self, font_size: int, notice: str | None = None) -> None:
         font = pygame.font.Font(None, font_size)
         self.screen.fill(self.background)
         y = self.margin_y
-        for line in DEMO_LINES:
+        lines = DEMO_LINES if notice is None else (*DEMO_LINES, "", notice)
+        for line in lines:
             if line:
                 text = font.render(line, True, self.foreground)
                 if text.get_width() > self.text_width:

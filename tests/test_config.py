@@ -5,8 +5,10 @@ import pytest
 
 from lyricspi.config import (
     DEFAULT_CONFIG_PATH,
+    PROJECT_ROOT,
     Config,
     ConfigError,
+    SongsConfig,
     load_config,
 )
 
@@ -94,4 +96,56 @@ def test_invalid_settings_are_rejected(
     path.write_text(json.dumps({section: {key: value}}), encoding="utf-8")
 
     with pytest.raises(ConfigError, match=rf"{section}\.{key}"):
+        load_config(path)
+
+
+def test_m1_config_uses_song_defaults(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.json"
+    path.write_text('{"display": {"font_size": 52}}', encoding="utf-8")
+
+    songs = load_config(path).songs
+
+    assert songs == SongsConfig()
+    assert songs.directory_path == PROJECT_ROOT / "demo_songs"
+    assert songs.mount_path is None
+
+
+def test_song_paths_are_relative_to_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "config.json"
+    path.write_text(
+        '{"songs": {"source_mode": "usb", "directory": "lyrics", '
+        '"linux_mount_path": "mount/USB"}}',
+        encoding="utf-8",
+    )
+
+    songs = load_config(path).songs
+
+    assert songs.source_mode == "usb"
+    assert songs.directory_path == PROJECT_ROOT / "lyrics"
+    assert songs.mount_path == PROJECT_ROOT / "mount" / "USB"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("source_mode", "auto"),
+        ("extension", ".md"),
+        ("encoding", "latin-1"),
+        ("sort_mode", "alphabetic"),
+        ("recursive", True),
+        ("recursive", "false"),
+        ("directory", "  "),
+        ("linux_mount_path", "mount\x00USB"),
+    ],
+)
+def test_invalid_song_config_is_rejected(
+    tmp_path: Path, key: str, value: object
+) -> None:
+    path = tmp_path / "invalid.json"
+    path.write_text(json.dumps({"songs": {key: value}}), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=rf"songs\.{key}"):
         load_config(path)

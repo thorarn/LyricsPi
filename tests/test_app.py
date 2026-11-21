@@ -1,11 +1,16 @@
 import logging
+from pathlib import Path
+from unittest.mock import Mock
 
 import pygame
 import pytest
 
 from lyricspi import Action
+from lyricspi import app
 from lyricspi.app import AppState, run
-from lyricspi.config import Config, DisplayConfig, SystemConfig
+from lyricspi.config import Config, DisplayConfig, SongsConfig, SystemConfig
+from lyricspi.renderer import Renderer
+from lyricspi.song_loader import SongLoadIssue
 
 
 @pytest.mark.parametrize(
@@ -116,3 +121,59 @@ def test_configured_fullscreen_uses_desktop_resolution(
 
     monkeypatch.setattr(pygame.event, "get", get_events)
     run(Config(display=DisplayConfig(fullscreen=True)))
+
+
+@pytest.mark.parametrize(
+    ("source", "issue"),
+    [
+        ("valid", None),
+        ("missing", SongLoadIssue.DIRECTORY_MISSING),
+        ("empty", SongLoadIssue.NO_SONGS),
+        ("usb", SongLoadIssue.USB_MISSING),
+    ],
+)
+def test_app_loads_setlist_once_and_draws_startup_notice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    source: str,
+    issue: SongLoadIssue | None,
+) -> None:
+    directory = tmp_path / source
+    if source in ("valid", "empty"):
+        directory.mkdir()
+    if source == "valid":
+        (directory / "1_Demo.txt").write_text("Lied", encoding="utf-8")
+    config = Config(
+        songs=SongsConfig(
+            directory=str(directory),
+            source_mode="usb" if source == "usb" else "directory",
+        )
+    )
+    load = Mock(wraps=app.load_setlist)
+    monkeypatch.setattr(app, "load_setlist", load)
+    monkeypatch.setattr("lyricspi.song_loader._usb_roots", lambda config: [])
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr(
+        pygame.event, "get", lambda: [pygame.event.Event(pygame.QUIT)]
+    )
+    draw = Mock(wraps=Renderer.draw)
+
+    # Mock the unbound method via a function so it still receives the instance.
+    def draw_frame(
+        renderer: Renderer, font_size: int, notice: str | None
+    ) -> None:
+        draw(renderer, font_size, notice)
+
+    monkeypatch.setattr(Renderer, "draw", draw_frame)
+    with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
+        run(config)
+
+    load.assert_called_once_with(config.songs)
+    draw.assert_called_once()
+    assert draw.call_args.args[1:] == (48, issue.value if issue else None)
+    if issue:
+        assert "0 Songs geladen." in caplog.text
+    else:
+        assert "1 Songs geladen." in caplog.text
+        assert "Erster Song: Demo (1_Demo.txt)" in caplog.text

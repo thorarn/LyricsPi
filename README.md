@@ -4,6 +4,7 @@ LyricsPi ist ein Offline-Songtext-Prompter für Live-Auftritte auf dem
 Raspberry Pi 3. Der Windows-Simulator (M1) zeigt einen festen Beispieltext
 in einem Pygame-Fenster. Der Text ist standardmäßig weiß auf schwarzem
 Hintergrund und lässt sich per Tastatur vergrößern und verkleinern.
+Seit M2 lädt LyricsPi beim Start eine Setlist in den Arbeitsspeicher.
 
 ## Einrichtung unter Windows
 
@@ -59,8 +60,66 @@ Fehlermeldung im Terminal.
   Bei einer sehr kleinen Fensterhöhe kann der Beispieltext unten abgeschnitten
   werden.
 
+## Songordner und USB-Stick
+
+LyricsPi liest beim Start die TXT-Dateien im obersten Verzeichnis der
+Songquelle. Die Dateiendung kann beispielsweise `.txt` oder `.TXT` lauten.
+Speichere die Dateien in UTF-8. Eine UTF-8-BOM am Dateianfang wird toleriert.
+Zeilenumbrüche, Leerzeilen, Einrückungen und nachgestellte Leerzeichen
+bleiben erhalten.
+
+Verwende das Namensschema `Nummer_Songname.txt`, etwa `02_Abend.txt`.
+`2_Abend.txt` steht vor `10_Morgen.txt`. Führende Nullen ändern die Nummer
+nicht. Bei gleicher Nummer gilt die Reihenfolge der vollständigen Dateinamen.
+Unterordner und symbolische Links werden übersprungen.
+
+Ohne weitere Einstellungen lädt LyricsPi den mitgelieferten Ordner
+`demo_songs`. Für einen anderen Ordner ergänze oder ändere den Abschnitt
+`songs` in `config/config.json`. Relative Songordner und Mount-Pfade
+beziehen sich auf den Projektroot. Absolute Pfade sind ebenfalls möglich.
+
+```json
+{
+  "songs": {
+    "source_mode": "directory",
+    "directory": "demo_songs",
+    "encoding": "utf-8-sig",
+    "extension": ".txt",
+    "sort_mode": "numeric_prefix",
+    "recursive": false
+  }
+}
+```
+
+Setze unter Windows `"source_mode": "usb"`, um beim Start nach
+eingebundenen Laufwerken zu suchen, die Windows als Wechseldatenträger
+meldet. Bei mehreren Kandidaten bittet LyricsPi darum, nur einen
+anzuschließen. Für ein USB-Laufwerk, das Windows als festes Laufwerk
+einstuft, kann dessen Laufwerkswurzel explizit mit `directory` gewählt werden.
+
+Unter Linux verwendet `usb` den konfigurierten, bereits eingehängten
+Mount-Punkt. Trage dort den tatsächlichen Mount-Pfad des Sticks ein.
+
+```json
+{
+  "songs": {
+    "source_mode": "usb",
+    "linux_mount_path": "/media/lyricspi/USB"
+  }
+}
+```
+
+Die Songquelle wird nur gelesen. Änderungen werden beim nächsten Start
+übernommen. Ein fehlender Stick, ein fehlender oder nicht lesbarer Songordner
+und eine leere Setlist erscheinen als Hinweis unter dem Demotext. Ungültige,
+leere oder nicht lesbare Einzeldateien werden übersprungen und protokolliert.
+Das Terminal zeigt die Anzahl geladener Songs und im Entwicklungsmodus
+den ersten Song. Im Fenster bleibt der Demotext sichtbar.
+
 ## Tests ausführen
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+Die Songtests erzeugen temporäre Dateien und simulieren die USB-Erkennung.

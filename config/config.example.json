@@ -15,5 +15,14 @@
     "development_mode": true,
     "allow_keyboard": true,
     "show_splash": false
+  },
+  "songs": {
+    "source_mode": "directory",
+    "directory": "demo_songs",
+    "linux_mount_path": "",
+    "encoding": "utf-8-sig",
+    "extension": ".txt",
+    "sort_mode": "numeric_prefix",
+    "recursive": false
   }
 }

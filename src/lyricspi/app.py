@@ -9,6 +9,8 @@ from . import Action
 from .config import Config, DisplayConfig
 from .keyboard_controller import action_for_key
 from .renderer import Renderer
+from .setlist import Setlist
+from .song_loader import load_setlist
 
 
 LOGGER = logging.getLogger(__name__)
@@ -21,6 +23,7 @@ class AppState:
     development_mode: bool
     running: bool = True
     last_action: Action | None = None
+    setlist: Setlist = Setlist()
 
     def apply_action(self, action: Action, display: DisplayConfig) -> None:
         self.last_action = action
@@ -41,11 +44,24 @@ class AppState:
 
 
 def run(config: Config) -> None:
-    state = AppState(config.display.font_size, config.system.development_mode)
+    loaded = load_setlist(config.songs)
+    state = AppState(
+        config.display.font_size,
+        config.system.development_mode,
+        setlist=loaded.setlist,
+    )
+    LOGGER.info("%d Songs geladen.", len(state.setlist))
+    first_song = state.setlist.first
+    if first_song is not None:
+        LOGGER.debug(
+            "Erster Song: %s (%s)", first_song.title, first_song.filename
+        )
+    notice = loaded.issue.value if loaded.issue is not None else None
+
     try:
         renderer = Renderer(config.display)
         clock = pygame.time.Clock()
-        renderer.draw(state.font_size)
+        renderer.draw(state.font_size, notice)
 
         while state.running:
             previous_size = state.font_size
@@ -66,7 +82,7 @@ def run(config: Config) -> None:
 
             if state.running:
                 if redraw or state.font_size != previous_size:
-                    renderer.draw(state.font_size)
+                    renderer.draw(state.font_size, notice)
                 clock.tick(FRAMES_PER_SECOND)
     finally:
         pygame.quit()

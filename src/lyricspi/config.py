@@ -8,6 +8,7 @@ from typing import TypeVar
 
 
 DEFAULT_CONFIG_PATH = Path("config") / "config.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ConfigError(ValueError):
@@ -36,12 +37,34 @@ class SystemConfig:
 
 
 @dataclass(frozen=True)
+class SongsConfig:
+    source_mode: str = "directory"
+    directory: str = "demo_songs"
+    linux_mount_path: str = ""
+    encoding: str = "utf-8-sig"
+    extension: str = ".txt"
+    sort_mode: str = "numeric_prefix"
+    recursive: bool = False
+
+    @property
+    def directory_path(self) -> Path:
+        return PROJECT_ROOT / self.directory
+
+    @property
+    def mount_path(self) -> Path | None:
+        if not self.linux_mount_path:
+            return None
+        return PROJECT_ROOT / self.linux_mount_path
+
+
+@dataclass(frozen=True)
 class Config:
     display: DisplayConfig = DisplayConfig()
     system: SystemConfig = SystemConfig()
+    songs: SongsConfig = SongsConfig()
 
 
-Section = TypeVar("Section", DisplayConfig, SystemConfig)
+Section = TypeVar("Section", DisplayConfig, SystemConfig, SongsConfig)
 
 
 def _load_section(name: str, values: object, defaults: Section) -> Section:
@@ -79,6 +102,32 @@ def _validate_display(display: DisplayConfig) -> None:
         raise ConfigError("display.margin_percent muss zwischen 0 und 49 sein.")
 
 
+def _validate_songs(songs: SongsConfig) -> None:
+    if songs.source_mode not in ("directory", "usb"):
+        raise ConfigError("songs.source_mode muss directory oder usb sein.")
+    if not songs.directory.strip():
+        raise ConfigError("songs.directory darf nicht leer sein.")
+    for key in ("directory", "linux_mount_path"):
+        value = getattr(songs, key)
+        path = Path(value)
+        if value and (
+            not value.strip()
+            or "\x00" in value
+            or (path.anchor and not path.is_absolute())
+        ):
+            raise ConfigError(
+                f"songs.{key} muss ein gültiger Verzeichnispfad sein."
+            )
+    if songs.encoding != "utf-8-sig":
+        raise ConfigError("songs.encoding muss utf-8-sig sein.")
+    if songs.extension != ".txt":
+        raise ConfigError("songs.extension muss .txt sein.")
+    if songs.sort_mode != "numeric_prefix":
+        raise ConfigError("songs.sort_mode muss numeric_prefix sein.")
+    if songs.recursive:
+        raise ConfigError("songs.recursive muss false sein.")
+
+
 def load_config(path: Path | None = None) -> Config:
     """Use defaults for a missing local file or missing individual settings."""
     config_path = DEFAULT_CONFIG_PATH if path is None else path
@@ -105,12 +154,14 @@ def load_config(path: Path | None = None) -> Config:
     if not isinstance(data, dict):
         raise ConfigError("Die Konfiguration muss ein JSON-Objekt sein.")
     for section in data:
-        if section not in ("display", "system"):
+        if section not in ("display", "system", "songs"):
             raise ConfigError(f"Unbekannter Abschnitt {section}.")
 
     display = _load_section(
         "display", data.get("display", {}), DisplayConfig()
     )
     system = _load_section("system", data.get("system", {}), SystemConfig())
+    songs = _load_section("songs", data.get("songs", {}), SongsConfig())
     _validate_display(display)
-    return Config(display=display, system=system)
+    _validate_songs(songs)
+    return Config(display=display, system=system, songs=songs)
