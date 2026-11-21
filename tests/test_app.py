@@ -358,6 +358,12 @@ def test_long_b_exits_application_without_system_command(
     system = Mock(side_effect=AssertionError("Unexpected OS command"))
     monkeypatch.setattr("os.system", system)
     monkeypatch.setattr("subprocess.Popen", system)
+    def after_display_quit() -> None:
+        assert not pygame.display.get_init()
+        assert not pygame.font.get_init()
+
+    shutdown = Mock(side_effect=after_display_quit)
+    monkeypatch.setattr(app, "request_shutdown", shutdown)
     start = [
         pygame.event.Event(pygame.KEYDOWN, key=pygame.K_DOWN),
     ]
@@ -375,4 +381,76 @@ def test_long_b_exits_application_without_system_command(
         if record.getMessage().startswith("Tastaturaktion")
     ] == [f"Tastaturaktion: {action.name}"]
     system.assert_not_called()
+    if action is Action.SHUTDOWN:
+        shutdown.assert_called_once_with()
+    else:
+        shutdown.assert_not_called()
     assert not pygame.display.get_init()
+
+
+@pytest.mark.parametrize("has_logo", [False, True])
+def test_splash_transitions_to_song_and_processes_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_logo: bool
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr(app, "PROJECT_ROOT", tmp_path)
+    song = tmp_path / "1_Lied.txt"
+    song.write_text("Erster Songtext", encoding="utf-8")
+    if has_logo:
+        logo_path = tmp_path / "assets" / "logo.png"
+        logo_path.parent.mkdir()
+        image = pygame.Surface((12, 8))
+        image.fill((255, 0, 0))
+        pygame.image.save(image, logo_path)
+
+    batches = iter([
+        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_PLUS)],
+        [],
+        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
+    ])
+    times_ns = iter([0, 200_000_000, 1_500_000_000, 1_600_000_000])
+    frames: list[pygame.Surface] = []
+    pages: list[tuple[int, Page]] = []
+    draw = Renderer.draw
+
+    def capture_page(
+        renderer: Renderer, size: int, page: Page, notice: str | None
+    ) -> None:
+        pages.append((size, page))
+        draw(renderer, size, page, notice)
+
+    def events() -> list[pygame.event.Event]:
+        screen = pygame.display.get_surface()
+        assert screen is not None
+        frames.append(screen.copy())
+        return next(batches)
+
+    monkeypatch.setattr(Renderer, "draw", capture_page)
+    monkeypatch.setattr(pygame.event, "get", events)
+    monkeypatch.setattr(app, "monotonic_ns", lambda: next(times_ns))
+    config = Config(
+        system=SystemConfig(show_splash=True),
+        songs=SongsConfig(directory=str(tmp_path)),
+    )
+    run(config)
+
+    splash = frames[0]
+    assert splash.get_at((0, 0)) == pygame.Color("black")
+    pixel_data = pygame.image.tobytes(splash, "RGB")
+    if has_logo:
+        assert splash.get_at(splash.get_rect().center) == pygame.Color("red")
+    else:
+        assert b"\xff\xff\xff" in pixel_data
+    assert pygame.image.tobytes(frames[1], "RGB") == pixel_data
+    assert pages == [(52, ("Erster Songtext",))]
+
+
+def test_missing_display_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr(pygame.display, "get_desktop_sizes", lambda: [])
+    with pytest.raises(RuntimeError, match="Kein Bildschirm"):
+        run(Config())
+    assert not pygame.display.get_init()
+    assert not pygame.font.get_init()

@@ -1,6 +1,7 @@
 """Measure and draw song pages and notices on the Pygame display."""
 
 import logging
+from pathlib import Path
 
 import pygame
 
@@ -18,15 +19,18 @@ class Renderer:
     ) -> None:
         pygame.display.init()
         pygame.font.init()
+        LOGGER.info("SDL-Bildschirmtreiber: %s", pygame.display.get_driver())
         desktop_sizes = pygame.display.get_desktop_sizes()
-        if not desktop_sizes:
-            raise RuntimeError("Bildschirmauflösung konnte nicht ermittelt werden.")
+        if not desktop_sizes or min(desktop_sizes[0]) < 1:
+            raise RuntimeError("Kein Bildschirm mit gültiger Auflösung erkannt.")
         LOGGER.info("Bildschirmauflösung: %d × %d", *desktop_sizes[0])
 
         if config.fullscreen:
             self.screen = pygame.display.set_mode(
                 desktop_sizes[0], pygame.FULLSCREEN
             )
+            pygame.display.set_allow_screensaver(False)
+            pygame.mouse.set_visible(False)
         else:
             self.screen = pygame.display.set_mode(
                 (config.window_width, config.window_height),
@@ -41,6 +45,29 @@ class Renderer:
         self.line_spacing = config.line_spacing
         self.font: pygame.font.Font | None = None
         self.font_size = 0
+
+    def load_splash_logo(self, path: Path) -> pygame.Surface | None:
+        try:
+            return pygame.image.load(path).convert_alpha()
+        except (OSError, pygame.error) as error:
+            LOGGER.info("Startlogo %s nicht verfügbar: %s", path, error)
+            return None
+
+    def draw_splash(self, logo: pygame.Surface | None) -> None:
+        self.screen.fill((0, 0, 0))
+        width, height = self.screen.get_size()
+        area = pygame.Rect(0, 0, max(1, width * 3 // 4), max(1, height // 2))
+        area.center = self.screen.get_rect().center
+        image = logo
+        if image is None:
+            font = self._font_for_size(max(1, min(128, height // 5)))
+            image = font.render("LyricsPi", True, (255, 255, 255))
+        if not area.contains(image.get_rect(center=area.center)):
+            bounds = image.get_rect().fit(area)
+            size = max(1, bounds.width), max(1, bounds.height)
+            image = pygame.transform.smoothscale(image, size)
+        self.screen.blit(image, image.get_rect(center=area.center))
+        pygame.display.flip()
 
     def _font_for_size(self, size: int) -> pygame.font.Font:
         if self.font is None or self.font_size != size:

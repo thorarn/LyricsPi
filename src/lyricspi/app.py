@@ -8,12 +8,13 @@ from time import monotonic_ns
 import pygame
 
 from . import Action
-from .config import Config, DisplayConfig
+from .config import PROJECT_ROOT, Config, DisplayConfig
 from .keyboard_controller import KeyboardController
 from .layout import LayoutTooSmall, Page
 from .navigation import Navigation
 from .renderer import Renderer
 from .setlist import Setlist, Song
+from .shutdown import request_shutdown
 from .song_loader import load_setlist
 
 
@@ -99,7 +100,9 @@ def _apply_keyboard_action(
     action: Action, state: AppState, display: DisplayConfig, renderer: Renderer
 ) -> bool:
     shutdown_requested = action is Action.SHUTDOWN
-    if shutdown_requested and (platform == "win32" or state.development_mode):
+    if shutdown_requested and (
+        not platform.startswith("linux") or state.development_mode
+    ):
         action = Action.EXIT
     LOGGER.debug("Tastaturaktion: %s", action.name)
     if action is Action.EXIT and not (
@@ -144,10 +147,25 @@ def run(config: Config) -> None:
     try:
         renderer = Renderer(config.display, resizable=state.development_mode)
         pygame.key.set_repeat()
+        LOGGER.info(
+            "Tastatureingabe (einschließlich USB-HID): %s",
+            "aktiv" if keyboard is not None else "deaktiviert",
+        )
         clock = pygame.time.Clock()
         size = renderer.screen.get_size()
         _update_layout(state, renderer)
-        _draw(state, renderer, notice)
+        splash_until = None
+        logo = None
+        if config.system.show_splash:
+            logo = renderer.load_splash_logo(
+                PROJECT_ROOT / "assets" / "logo.png"
+            )
+            renderer.draw_splash(logo)
+            splash_until = (
+                monotonic_ns() / 1_000_000 + config.system.splash_duration_ms
+            )
+        else:
+            _draw(state, renderer, notice)
 
         while state.running:
             events = pygame.event.get()
@@ -183,10 +201,18 @@ def run(config: Config) -> None:
                     break
 
             if state.running:
+                if splash_until is not None and now_ms >= splash_until:
+                    splash_until = None
+                    redraw = True
                 if redraw:
-                    _draw(state, renderer, notice)
+                    if splash_until is None:
+                        _draw(state, renderer, notice)
+                    else:
+                        renderer.draw_splash(logo)
                 clock.tick(FRAMES_PER_SECOND)
     except pygame.error as error:
         raise RuntimeError("Fehler bei der Bildschirmausgabe.") from error
     finally:
         pygame.quit()
+    if state.last_action is Action.SHUTDOWN:
+        request_shutdown()

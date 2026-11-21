@@ -75,8 +75,14 @@ def _usb_roots(config: SongsConfig) -> list[Path]:
         return _windows_removable_roots()
     if sys.platform.startswith("linux"):
         mount = config.mount_path
-        if mount is not None and mount.is_mount():
-            return [mount]
+        if mount is not None:
+            mounted = mount.is_mount()
+            LOGGER.info(
+                "USB-Mountpunkt %s: %s",
+                mount, "eingehängt" if mounted else "nicht eingehängt",
+            )
+            if mounted:
+                return [mount]
     return []
 
 

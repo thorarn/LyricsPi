@@ -84,8 +84,9 @@ die Messung. Im Entwicklungsmodus protokolliert das Terminal
 `KEYDOWN Arrow Down`, `KEYUP Arrow Down`, die gemessene Haltezeit und die Aktion.
 
 Unter Windows und im Entwicklungsmodus beendet ein langer Druck LyricsPi
-über `EXIT`. Im Raspberry-Pi-Produktivmodus erzeugt er `SHUTDOWN` und
-schließt LyricsPi. Das Herunterfahren des Systems folgt in M6.
+über `EXIT`. Im eingerichteten Raspberry-Pi-Produktivmodus gibt LyricsPi
+zuerst die Anzeige frei und fordert anschließend über logind das reguläre
+Herunterfahren an.
 
 Für die Hardwareabnahme starte LyricsPi im Entwicklungsmodus mit einem
 mehrseitigen Song und prüfe A, B, C und D. Drücke B zunächst kurz und prüfe,
@@ -198,3 +199,9 @@ aktuellen Song, die Seite und die Gesamtseitenzahl.
 Die Songtests erzeugen temporäre Dateien und simulieren die USB-Erkennung.
 Die Anzeigetests verwenden den simulierten SDL-Videotreiber.
 Die HID-Tests verwenden simulierte Tastaturereignisse und Zeitpunkte.
+
+## Raspberry Pi 3
+
+Die [Installationsanleitung](docs/raspberry-pi-installation.md) beschreibt
+Raspberry Pi OS Lite, HDMI über DRM/KMS, den schreibgeschützten USB-Mount,
+den systemd-Autostart, die Hardwareabnahme und die Wartung über SSH.

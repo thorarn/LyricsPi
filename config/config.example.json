@@ -15,7 +15,8 @@
   "system": {
     "development_mode": true,
     "allow_keyboard": true,
-    "show_splash": false
+    "show_splash": false,
+    "splash_duration_ms": 1500
   },
   "songs": {
     "source_mode": "directory",

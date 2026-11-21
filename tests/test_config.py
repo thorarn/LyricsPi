@@ -1,8 +1,9 @@
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
+from lyricspi import config as config_module
 from lyricspi.config import (
     DEFAULT_CONFIG_PATH,
     PROJECT_ROOT,
@@ -89,6 +90,8 @@ def test_explicit_missing_file_reports_path(tmp_path: Path) -> None:
         ("display", "line_spacing", True),
         ("display", "fullscreen", "false"),
         ("system", "show_splash", 1),
+        ("system", "splash_duration_ms", 0),
+        ("system", "splash_duration_ms", True),
         ("system", "unknown", True),
     ],
 )
@@ -196,3 +199,17 @@ def test_configures_longer_shutdown_hold(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert load_config(path).input == InputConfig("down", 18000)
+
+
+def test_absolute_linux_mount_path_ignores_checkout_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        '{"songs": {"source_mode": "usb", "linux_mount_path": "/media/lyricspi/USB"}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_module, "PROJECT_ROOT", PurePosixPath("/opt/lyricspi"))
+    monkeypatch.setattr(config_module, "Path", PurePosixPath)
+
+    assert load_config(path).songs.mount_path == PurePosixPath("/media/lyricspi/USB")

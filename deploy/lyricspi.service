@@ -1,0 +1,39 @@
+[Unit]
+Description=LyricsPi Songtext-Prompter
+Wants=media-lyricspi-USB.mount
+After=media-lyricspi-USB.mount systemd-logind.service systemd-user-sessions.service
+StartLimitIntervalSec=120s
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=lyricspi
+Group=lyricspi
+SupplementaryGroups=video render input
+WorkingDirectory=/opt/lyricspi
+Environment=PATH=/usr/bin:/bin
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=TERM=linux
+Environment=PYGAME_HIDE_SUPPORT_PROMPT=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty7
+TTYReset=yes
+ExecStartPre=+/usr/bin/chvt 7
+ExecStartPre=-+/bin/sh -c '/usr/bin/setterm --blank 0 </dev/tty7 >/dev/tty7'
+ExecStartPre=-/bin/sh -c 'printf "Raspberry-Pi-Modell: "; /usr/bin/tr -d "\\000" </proc/device-tree/model; printf "\\n"'
+ExecStart=/opt/lyricspi/.venv/bin/python -m lyricspi.main --config /opt/lyricspi/config/config.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=25s
+TimeoutStopSec=10s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

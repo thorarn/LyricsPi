@@ -35,6 +35,7 @@ class SystemConfig:
     development_mode: bool = True
     allow_keyboard: bool = True
     show_splash: bool = False
+    splash_duration_ms: int = 1500
 
 
 @dataclass(frozen=True)
@@ -183,4 +184,6 @@ def load_config(path: Path | None = None) -> Config:
     keyboard = _load_section("input", data.get("input", {}), InputConfig())
     _validate_display(display)
     _validate_songs(songs)
+    if system.splash_duration_ms < 1:
+        raise ConfigError("system.splash_duration_ms muss größer als 0 sein.")
     return Config(display=display, system=system, songs=songs, input=keyboard)

@@ -221,3 +221,21 @@ def test_linux_uses_only_mounted_configured_path(
         assert len(result.setlist) == 1
     else:
         assert result.issue is SongLoadIssue.USB_MISSING
+
+
+def test_linux_mount_access_failure_is_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def denied(path: Path) -> bool:
+        raise PermissionError(f"Mountpunkt nicht lesbar: {path}")
+
+    monkeypatch.setattr(song_loader, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(Path, "is_mount", denied)
+    songs = SongsConfig(source_mode="usb", linux_mount_path=str(tmp_path))
+    result = load_setlist(songs)
+
+    assert result.issue is SongLoadIssue.SOURCE_UNREADABLE
+    assert not result.setlist
+    assert "USB-Erkennung fehlgeschlagen" in caplog.text
