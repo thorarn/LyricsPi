@@ -8,13 +8,19 @@ from sys import platform
 import pygame
 
 from .config import DisplayConfig
-from .layout import LayoutTooSmall, Page, paginate
-from .setlist import Song
+from .layout import LayoutTooSmall, Page, TextPosition, paginate
+from .setlist import Setlist, Song
 
 
 LOGGER = logging.getLogger(__name__)
 FONT_NAMES = ("Consolas", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 TRACK_COLOR = pygame.Color("#555555")
+MENU_OPTIONS = (
+    "A  Schrift kleiner",
+    "B  Schrift größer",
+    "C  Alle Songs auflisten",
+    "D  Zum Song zurück",
+)
 
 
 def progress_position(page_index: int, page_count: int) -> float:
@@ -96,10 +102,11 @@ class Renderer:
         return pygame.Rect(x, y, width - 2 * x, height - 2 * y)
 
     def layout(
-        self, content: str, font_size: int, *, song: Song | None = None
+        self, content: str, font_size: int, *, song: Song | None = None,
+        page_starts: list[TextPosition] | None = None,
     ) -> tuple[Page, ...]:
         _, _, lyrics = self._song_areas(self._font_for_size(font_size), song)
-        return self._paginate(content, font_size, lyrics)
+        return self._paginate(content, font_size, lyrics, page_starts=page_starts)
 
     def _song_areas(
         self, font: pygame.font.Font, song: Song | None = None
@@ -127,7 +134,8 @@ class Renderer:
         return header, rail, lyrics
 
     def _paginate(
-        self, content: str, font_size: int, area: pygame.Rect
+        self, content: str, font_size: int, area: pygame.Rect, *,
+        page_starts: list[TextPosition] | None = None,
     ) -> tuple[Page, ...]:
         font = self._font_for_size(font_size)
         return paginate(
@@ -137,7 +145,132 @@ class Renderer:
             font.size,
             font.get_height(),
             self.line_spacing,
+            page_starts=page_starts,
         )
+
+    def _fitting_pages(
+        self, content: str, font: pygame.font.Font, area: pygame.Rect
+    ) -> tuple[Page, ...]:
+        try:
+            return paginate(
+                content, area.width, area.height, font.size, font.get_height(),
+                self.line_spacing,
+            )
+        except LayoutTooSmall:
+            return ()
+
+    def _page_height(self, page: Page, font: pygame.font.Font) -> int:
+        return sum(max(font.get_height(), font.size(line)[1]) for line in page) + (
+            len(page) - 1
+        ) * self.line_spacing
+
+    def draw_main_menu(self, font_size: int, page_index: int = 0) -> int:
+        self.screen.fill("black")
+        area = self._content_area()
+        font = self._font_for_size(font_size)
+        options = "\n".join(MENU_OPTIONS)
+        pages = self._fitting_pages(
+            f"Hauptmenü · Schriftgröße {font_size}\n{options}", font, area
+        )
+        if len(pages) != 1:
+            pages = self._fitting_pages(options, font, area)
+        return self._draw_menu_pages(pages, page_index, font, area)
+
+    def _draw_menu_pages(
+        self, pages: tuple[Page, ...], page_index: int, font: pygame.font.Font,
+        area: pygame.Rect, *, selected: bool = False,
+    ) -> int:
+        if pages:
+            self._draw_menu_block(
+                pages[page_index % len(pages)], font, area, selected=selected
+            )
+        else:
+            self._draw_small_window_notice(font, area, "white")
+        pygame.display.flip()
+        return len(pages)
+
+    def _draw_menu_block(
+        self, page: Page, font: pygame.font.Font, area: pygame.Rect, *,
+        selected: bool = False,
+    ) -> None:
+        if selected:
+            bounds = pygame.Rect(
+                area.left, area.top, area.width, self._page_height(page, font)
+            )
+            self.screen.fill("white", bounds)
+        self._draw_lines(page, font, area, color="black" if selected else "white")
+
+    def draw_song_list(
+        self, setlist: Setlist, selected: int, font_size: int, page_index: int = 0
+    ) -> int:
+        self.screen.fill("black")
+        area = self._content_area()
+        font = self._font_for_size(font_size)
+        title = "Songliste"
+        if not setlist:
+            empty = "Keine Songs geladen"
+            pages = self._fitting_pages(f"{title}\n{empty}", font, area)
+            if len(pages) != 1:
+                pages = self._fitting_pages(empty, font, area)
+            return self._draw_menu_pages(pages, page_index, font, area)
+
+        def song_pages(index: int) -> tuple[Page, ...]:
+            song = setlist[index]
+            return self._fitting_pages(
+                f"{song.display_number}  {song.title}", font, area
+            )
+
+        current = song_pages(selected)
+        if len(current) != 1:
+            return self._draw_menu_pages(
+                current, page_index, font, area, selected=True
+            )
+
+        current_height = self._page_height(current[0], font)
+        heading = (title,)
+        heading_height = self._page_height(heading, font) + self.line_spacing
+        if (
+            font.size(title)[0] <= area.width
+            and heading_height + current_height <= area.height
+        ):
+            self._draw_menu_block(heading, font, area)
+            area.top += heading_height
+            area.height -= heading_height
+
+        remaining = area.height - current_height
+        below: list[Page] = []
+        above: list[Page] = []
+        for indices, visible in (
+            (range(selected + 1, len(setlist)), below),
+            (range(selected - 1, -1, -1), above),
+        ):
+            for index in indices:
+                if remaining < font.get_height() + self.line_spacing:
+                    break
+                pages = song_pages(index)
+                if len(pages) != 1:
+                    break
+                height = self._page_height(pages[0], font) + self.line_spacing
+                if height > remaining:
+                    break
+                visible.append(pages[0])
+                remaining -= height
+
+        for index, page in enumerate((*reversed(above), current[0], *below)):
+            self._draw_menu_block(page, font, area, selected=index == len(above))
+            area.top += self._page_height(page, font) + self.line_spacing
+        pygame.display.flip()
+        return 1
+
+    def _draw_small_window_notice(
+        self, font: pygame.font.Font, area: pygame.Rect, color: pygame.Color | str,
+        notice: str = "Fenster zu klein.",
+    ) -> None:
+        # The diagnostic must stay visible when even a line cannot fit.
+        text = font.render(notice, True, color)
+        bounds = text.get_rect().fit(area)
+        size = max(1, bounds.width), max(1, bounds.height)
+        self.screen.blit(pygame.transform.smoothscale(text, size), area)
 
     def draw(
         self,
@@ -159,22 +292,12 @@ class Renderer:
                 self._draw_progress(rail, page_index, page_count)
             self._draw_lines(page, font, lyrics)
         elif area.width > 0 and area.height > 0:
-            notice_size = min(font_size, 32)
-            try:
-                pages = self._paginate(notice, notice_size, area)
-            except LayoutTooSmall:
-                pages = ()
-            font = self._font_for_size(notice_size)
+            font = self._font_for_size(font_size)
+            pages = self._fitting_pages(notice, font, area)
             if len(pages) == 1:
                 self._draw_lines(pages[0], font, area)
             else:
-                # A notice must remain visible even if lyrics no longer fit.
-                text = font.render(notice, True, self.foreground)
-                bounds = text.get_rect().fit(area)
-                size = max(1, bounds.width), max(1, bounds.height)
-                self.screen.blit(
-                    pygame.transform.smoothscale(text, size), area
-                )
+                self._draw_small_window_notice(font, area, self.foreground, notice)
         pygame.display.flip()
 
     def _draw_header(
@@ -215,13 +338,16 @@ class Renderer:
         pygame.draw.rect(self.screen, self.foreground, marker)
 
     def _draw_lines(
-        self, page: Page, font: pygame.font.Font, area: pygame.Rect
+        self, page: Page, font: pygame.font.Font, area: pygame.Rect, *,
+        color: pygame.Color | str | None = None,
     ) -> None:
+        if color is None:
+            color = self.foreground
         y = area.top
         for line in page:
             height = font.get_height()
             if line.strip():
-                text = font.render(line, True, self.foreground)
+                text = font.render(line, True, color)
                 self.screen.blit(text, (area.left, y))
                 height = max(height, text.get_height())
             y += height + self.line_spacing

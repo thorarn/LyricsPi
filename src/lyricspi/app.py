@@ -1,16 +1,17 @@
 """Coordinate input, application state and rendering."""
 
 import logging
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from sys import platform
 from time import monotonic_ns
 
 import pygame
 
-from . import Action
+from . import Action, View
 from .config import PROJECT_ROOT, Config, DisplayConfig
 from .keyboard_controller import KeyboardController
-from .layout import LayoutTooSmall, Page
+from .layout import LayoutTooSmall, Page, TextPosition
 from .navigation import Navigation
 from .renderer import Renderer
 from .setlist import Setlist, Song
@@ -20,6 +21,7 @@ from .song_loader import load_setlist
 
 LOGGER = logging.getLogger(__name__)
 FRAMES_PER_SECOND = 30
+VIEW_PAGE_DURATION_MS = 3000
 SMALL_WINDOW_NOTICE = "Fenster zu klein."
 
 
@@ -32,6 +34,10 @@ class AppState:
     setlist: Setlist = Setlist()
     navigation: Navigation = field(default_factory=Navigation)
     pages: tuple[Page, ...] = ()
+    page_starts: list[TextPosition] = field(default_factory=list)
+    text_position: TextPosition = (0, 0)
+    view: View = View.SONG_VIEW
+    selected_song: int = 0
 
     @property
     def song(self) -> Song | None:
@@ -56,23 +62,63 @@ class AppState:
             self.font_size = min(
                 display.font_max, self.font_size + display.font_step
             )
-        else:
-            self.navigation.apply_action(
-                action, len(self.setlist), len(self.pages)
-            )
+        elif self.view is View.SONG_VIEW:
+            self._apply_song_action(action)
+        elif self.view is View.MAIN_MENU:
+            if action is Action.OPEN_SONG_LIST:
+                self.selected_song = self.navigation.song_index
+                self.view = View.SONG_LIST
+            elif action is Action.BACK:
+                self.view = View.SONG_VIEW
+        elif action is Action.BACK:
+            self.view = View.MAIN_MENU
+        elif self.setlist:
+            if action is Action.OPEN_SELECTED_SONG:
+                self.navigation.song_index = self.selected_song
+                self.navigation.page_index = 0
+                self.text_position = (0, 0)
+                self.view = View.SONG_VIEW
+            elif action in (Action.SELECT_PREVIOUS, Action.SELECT_NEXT):
+                step = 1 if action is Action.SELECT_NEXT else -1
+                self.selected_song = max(
+                    0, min(self.selected_song + step, len(self.setlist) - 1)
+                )
 
         if self.font_size != previous_size:
             LOGGER.info("Schriftgröße: %d → %d", previous_size, self.font_size)
+
+    def _apply_song_action(self, action: Action) -> None:
+        if action is Action.OPEN_MENU:
+            self.view = View.MAIN_MENU
+        elif action in (Action.PREVIOUS_SONG, Action.NEXT_SONG):
+            self.navigation.apply_action(
+                action, len(self.setlist), len(self.pages)
+            )
+            self.text_position = (0, 0)
+        elif action in (Action.PREVIOUS_PAGE, Action.NEXT_PAGE):
+            previous_page = self.navigation.page_index
+            self.navigation.apply_action(
+                action, len(self.setlist), len(self.pages)
+            )
+            if self.navigation.page_index != previous_page:
+                self.text_position = self.page_starts[self.navigation.page_index]
 
 
 def _update_layout(state: AppState, renderer: Renderer) -> None:
     song = state.song
     if song is None:
         return
+    state.page_starts.clear()
     try:
-        state.pages = renderer.layout(song.content, state.font_size, song=song)
+        state.pages = renderer.layout(
+            song.content, state.font_size,
+            song=song, page_starts=state.page_starts,
+        )
     except LayoutTooSmall:
         state.pages = ()
+    state.navigation.page_index = bisect_right(
+        state.page_starts, state.text_position
+    ) - 1
     state.navigation.clamp_page(len(state.pages))
     LOGGER.debug(
         "Layout neu berechnet für %s (%d × %d, Schriftgröße %d, %d Seiten)",
@@ -84,8 +130,16 @@ def _update_layout(state: AppState, renderer: Renderer) -> None:
 
 
 def _draw(
-    state: AppState, renderer: Renderer, source_notice: str | None
-) -> None:
+    state: AppState, renderer: Renderer, source_notice: str | None,
+    *, view_page: int = 0,
+) -> int:
+    if state.view is View.MAIN_MENU:
+        return renderer.draw_main_menu(state.font_size, view_page)
+    if state.view is View.SONG_LIST:
+        return renderer.draw_song_list(
+            state.setlist, state.selected_song, state.font_size, view_page
+        )
+
     notice = source_notice
     if state.setlist and not state.pages:
         notice = SMALL_WINDOW_NOTICE
@@ -101,6 +155,7 @@ def _draw(
         page_index=state.navigation.page_index,
         page_count=len(state.pages),
     )
+    return 1
 
 
 def _apply_keyboard_action(
@@ -113,7 +168,7 @@ def _apply_keyboard_action(
         action = Action.EXIT
     LOGGER.debug("Tastaturaktion: %s", action.name)
     if action is Action.EXIT and not (
-        state.development_mode or shutdown_requested
+        (state.development_mode and platform == "win32") or shutdown_requested
     ):
         return False
     if action is Action.SHUTDOWN:
@@ -121,6 +176,8 @@ def _apply_keyboard_action(
     song = state.song
     page_index = state.navigation.page_index
     font_size = state.font_size
+    view = state.view
+    selection = state.selected_song
     state.apply_action(action, display)
 
     current_song = state.song
@@ -130,7 +187,11 @@ def _apply_keyboard_action(
     if song_changed or font_size != state.font_size:
         _update_layout(state, renderer)
         return True
-    return page_index != state.navigation.page_index
+    return (
+        page_index != state.navigation.page_index
+        or view is not state.view
+        or selection != state.selected_song
+    )
 
 
 def run(config: Config) -> None:
@@ -163,6 +224,9 @@ def run(config: Config) -> None:
         _update_layout(state, renderer)
         splash_until = None
         logo = None
+        view_page = 0
+        view_page_count = 1
+        next_view_page_ms = 0.0
         if config.system.show_splash:
             logo = renderer.load_splash_logo(
                 PROJECT_ROOT / "assets" / "logo.png"
@@ -178,11 +242,13 @@ def run(config: Config) -> None:
             events = pygame.event.get()
             now_ms = monotonic_ns() / 1_000_000
             new_size = renderer.screen.get_size()
+            previous_view = state.view
+            previous_selection = state.selected_song
             redraw = new_size != size
             if redraw:
+                view_page = 0
                 size = new_size
                 _update_layout(state, renderer)
-            actions: list[Action] = []
             for event in events:
                 if event.type == pygame.QUIT:
                     state.apply_action(Action.EXIT, config.display)
@@ -190,30 +256,55 @@ def run(config: Config) -> None:
                 elif event.type == pygame.WINDOWEXPOSED:
                     redraw = True
                 elif keyboard is not None:
-                    actions.extend(keyboard.handle_event(event, now_ms))
+                    for action in keyboard.handle_event(event, now_ms, state.view):
+                        view = state.view
+                        redraw |= _apply_keyboard_action(
+                            action, state, config.display, renderer
+                        )
+                        if state.view is not view:
+                            keyboard.view_changed()
+                    if not state.running:
+                        break
             if not state.running:
                 break
             if keyboard is not None:
                 pressed = pygame.key.get_pressed()
-                shutdown_pressed = pressed[pygame.K_DOWN] and pygame.key.get_focused()
-                actions.extend(
-                    keyboard.poll(now_ms, shutdown_pressed=shutdown_pressed)
-                )
-            for action in actions:
-                changed = _apply_keyboard_action(
-                    action, state, config.display, renderer
-                )
-                redraw = redraw or changed
-                if not state.running:
-                    break
+                focused = pygame.key.get_focused()
+                for action in keyboard.poll(
+                    now_ms, is_pressed=lambda key: focused and pressed[key]
+                ):
+                    view = state.view
+                    redraw |= _apply_keyboard_action(
+                        action, state, config.display, renderer
+                    )
+                    if state.view is not view:
+                        keyboard.view_changed()
+                        break
+                    if not state.running:
+                        break
 
             if state.running:
-                if splash_until is not None and now_ms >= splash_until:
+                if splash_until is not None and (
+                    now_ms >= splash_until or state.view is not View.SONG_VIEW
+                ):
                     splash_until = None
+                    redraw = True
+                if state.view is not previous_view or (
+                    state.selected_song != previous_selection
+                ):
+                    view_page = 0
+                if (
+                    not redraw and view_page_count > 1
+                    and now_ms >= next_view_page_ms
+                ):
+                    view_page = (view_page + 1) % view_page_count
                     redraw = True
                 if redraw:
                     if splash_until is None:
-                        _draw(state, renderer, notice)
+                        view_page_count = _draw(
+                            state, renderer, notice, view_page=view_page
+                        )
+                        next_view_page_ms = now_ms + VIEW_PAGE_DURATION_MS
                     else:
                         renderer.draw_splash(logo)
                 clock.tick(FRAMES_PER_SECOND)

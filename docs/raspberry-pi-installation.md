@@ -150,9 +150,15 @@ Produktiveinstellungen anschließend bei Bedarf manuell.
 2. `findmnt --mountpoint /media/lyricspi/USB -o SOURCE,TARGET,FSTYPE,OPTIONS`
    ausführen. Das Gerät und die Option `ro` prüfen. Songs numerisch
    sortiert und nur aus dem Wurzelverzeichnis erwarten.
-3. In einem mehrseitigen Song die Fußtasten prüfen. A blättert zurück,
-   B kurz beim Loslassen weiter. C wechselt zum vorherigen und D zum
-   nächsten Song. Den Controller im Betrieb ab- und wieder anstecken.
+3. In der Songansicht mit A und B kurz den vorherigen bzw. nächsten Song
+   öffnen. In einem mehrseitigen Song mit C und D zurück- bzw. weiterblättern.
+   A mindestens 5 Sekunden halten und das Hauptmenü prüfen. Beim Loslassen
+   muss der Song erhalten bleiben. Im Hauptmenü ändern A und B die
+   Schriftgröße, C öffnet die Songliste und D kehrt zur bisherigen Textstelle
+   zurück. In der Songliste bewegen A und B die Markierung, C öffnet den
+   markierten Song auf Seite 1 und D führt zurück zum Hauptmenü.
+   Den Controller im Betrieb ab- und wieder anstecken.
+   [Vollständige Tastenbelegung](../README.md#bedienung-mit-fußcontroller-und-tastatur)
 4. Dienst stoppen, Stick abziehen und den Dienst starten. Statt eines
    Absturzes muss der Hinweis auf den fehlenden Stick erscheinen.
    Danach Stick einstecken und den Dienst neu starten.
@@ -164,9 +170,9 @@ sudo -u lyricspi busctl --system call org.freedesktop.login1 \
 ```
 
 Erwartet wird `s "yes"`. In einem Wartungsfenster gegebenenfalls laufende
-Arbeiten sichern und **B mindestens 15 Sekunden** halten. Die Anzeige darf
-vor dem regulären Herunterfahren keinen Seitenwechsel auslösen. Erst nach
-dem vollständigen Halt die Stromversorgung trennen. Nach dem nächsten Boot
+Arbeiten sichern und **B in der Songansicht mindestens 15 Sekunden** halten.
+Die Anzeige darf vor dem regulären Herunterfahren keinen Songwechsel auslösen.
+Erst nach dem vollständigen Halt die Stromversorgung trennen. Nach dem nächsten Boot
 kann `journalctl -b -1 -u lyricspi.service` den vorherigen Start und
 Shutdown zeigen, sofern das Journal frühere Boots speichert. Sendet der
 Controller beim Halten nur kurze Tastaturimpulse, ist der Langdruck mit
@@ -326,9 +332,9 @@ SDL_VIDEODRIVER=x11 startx /opt/lyricspi/.venv/bin/python \
   -m lyricspi.main --config "$HOME/lyricspi-x11.json" -- :0
 ```
 
-Diese Diagnose verwendet die Demo-Songs und den Entwicklungsmodus mit
-Escape zum Beenden. Der Autostart und Poweroff werden mit dem regulären
-Dienst geprüft.
+Diese Diagnose verwendet die Demo-Songs und den Entwicklungsmodus. Halte
+B in der Songansicht mindestens 15 Sekunden, um LyricsPi zu beenden.
+Der Autostart und Poweroff werden mit dem regulären Dienst geprüft.
 
 Bei einem Abbruch des Installers zuerst die ausgegebenen Werte für Modell,
 Kernel, `armhf`, 32-Bit-Userspace und Debian-Codename prüfen. Bei

@@ -1,28 +1,48 @@
-"""Translate Pygame key presses into input-independent actions."""
+"""Translate Pygame key presses into actions for the active view."""
 
 import logging
+from collections.abc import Callable
 
 import pygame
 
-from . import Action
+from . import Action, View
 from .config import InputConfig
 
 
+ARROW_ACTIONS = {
+    View.SONG_VIEW: {
+        pygame.K_UP: Action.PREVIOUS_SONG,
+        pygame.K_DOWN: Action.NEXT_SONG,
+        pygame.K_LEFT: Action.PREVIOUS_PAGE,
+        pygame.K_RIGHT: Action.NEXT_PAGE,
+    },
+    View.MAIN_MENU: {
+        pygame.K_UP: Action.FONT_SMALLER,
+        pygame.K_DOWN: Action.FONT_LARGER,
+        pygame.K_LEFT: Action.OPEN_SONG_LIST,
+        pygame.K_RIGHT: Action.BACK,
+    },
+    View.SONG_LIST: {
+        pygame.K_UP: Action.SELECT_PREVIOUS,
+        pygame.K_DOWN: Action.SELECT_NEXT,
+        pygame.K_LEFT: Action.OPEN_SELECTED_SONG,
+        pygame.K_RIGHT: Action.BACK,
+    },
+}
 KEY_ACTIONS = {
-    pygame.K_LEFT: Action.PREVIOUS_SONG,
-    pygame.K_RIGHT: Action.NEXT_SONG,
-    pygame.K_UP: Action.PREVIOUS_PAGE,
-    pygame.K_DOWN: Action.NEXT_PAGE,
     pygame.K_MINUS: Action.FONT_SMALLER,
     pygame.K_KP_MINUS: Action.FONT_SMALLER,
     pygame.K_PLUS: Action.FONT_LARGER,
     pygame.K_KP_PLUS: Action.FONT_LARGER,
     pygame.K_ESCAPE: Action.EXIT,
 }
+MENU_HOLD_MS = 5000
 LOGGER = logging.getLogger(__name__)
 
 
-def action_for_key(event: pygame.event.Event) -> Action | None:
+def action_for_key(
+    event: pygame.event.Event, view: View = View.SONG_VIEW
+) -> Action | None:
     if event.type != pygame.KEYDOWN:
         return None
 
@@ -34,74 +54,86 @@ def action_for_key(event: pygame.event.Event) -> Action | None:
         return Action.FONT_SMALLER
     if typed and event.key in (pygame.K_PLUS, pygame.K_MINUS):
         return None
-    return KEY_ACTIONS.get(event.key)
+    return ARROW_ACTIONS[view].get(event.key) or KEY_ACTIONS.get(event.key)
 
 
 class KeyboardController:
-    """Distinguish a short tap on B from a confirmed shutdown hold."""
+    """Track real A/B holds while preventing repeats across view changes."""
 
     def __init__(self, config: InputConfig) -> None:
-        self.config = config
-        self._down_since: float | None = None
-        self._hold_confirmed = False
-        self._shutdown_fired = False
+        self._long_actions = {
+            pygame.K_UP: (MENU_HOLD_MS, Action.OPEN_MENU),
+            pygame.K_DOWN: (config.shutdown_hold_ms, Action.SHUTDOWN),
+        }
+        self._arrows_down: set[int] = set()
+        self._holds: dict[int, float] = {}
 
-    def _reset_hold(self) -> None:
-        self._down_since = None
-        self._hold_confirmed = False
-        self._shutdown_fired = False
+    def view_changed(self) -> None:
+        # Keep held arrows consumed until release, even in the next view.
+        self._holds.clear()
 
     def poll(
-        self, now_ms: float, *, shutdown_pressed: bool = False
+        self, now_ms: float, *, is_pressed: Callable[[int], bool]
     ) -> list[Action]:
-        if self._down_since is None:
-            return []
-        if not shutdown_pressed:
-            LOGGER.debug("Arrow Down ohne KEYUP freigegeben. Haltezeit verworfen.")
-            self._reset_hold()
-            return []
-        self._hold_confirmed = True
-        duration_ms = now_ms - self._down_since
-        if not self._shutdown_fired and duration_ms >= self.config.shutdown_hold_ms:
-            self._shutdown_fired = True
-            LOGGER.debug("Arrow Down %.0f ms gehalten. Aktion SHUTDOWN.", duration_ms)
-            return [Action.SHUTDOWN]
-        return []
+        actions: list[Action] = []
+        released = {key for key in self._arrows_down if not is_pressed(key)}
+        self._arrows_down.difference_update(released)
+        for key in released:
+            if self._holds.pop(key, None) is not None:
+                LOGGER.debug("%s ohne KEYUP freigegeben.", pygame.key.name(key))
+
+        for key, since_ms in tuple(self._holds.items()):
+            threshold, action = self._long_actions[key]
+            duration = now_ms - since_ms
+            if duration >= threshold:
+                del self._holds[key]
+                LOGGER.debug(
+                    "%s %.0f ms gehalten. Aktion %s.",
+                    pygame.key.name(key), duration, action.name,
+                )
+                actions.append(action)
+        return actions
 
     def handle_event(
-        self, event: pygame.event.Event, now_ms: float
+        self, event: pygame.event.Event, now_ms: float,
+        view: View = View.SONG_VIEW,
     ) -> list[Action]:
         if event.type == pygame.WINDOWFOCUSLOST:
-            self._reset_hold()
+            self._arrows_down.clear()
+            self._holds.clear()
             return []
 
         if event.type not in (pygame.KEYDOWN, pygame.KEYUP):
             return []
-        if event.key != pygame.K_DOWN:
-            action = action_for_key(event)
-            return [action] if action and not getattr(event, "repeat", False) else []
-        if event.type == pygame.KEYDOWN:
-            if self._down_since is not None or getattr(event, "repeat", False):
-                LOGGER.debug("KEYDOWN Arrow Down (Autorepeat ignoriert).")
-            else:
-                LOGGER.debug("KEYDOWN Arrow Down.")
-                self._down_since = now_ms
-            return []
+        key = event.key
+        if event.type == pygame.KEYUP:
+            self._arrows_down.discard(key)
+            since_ms = self._holds.pop(key, None)
+            if since_ms is None:
+                return []
+            duration = now_ms - since_ms
+            threshold, _ = self._long_actions[key]
+            # A queued KEYUP cannot prove the key was down at the threshold.
+            if duration >= threshold:
+                LOGGER.debug(
+                    "KEYUP %s nach %.0f ms ohne bestätigten Langdruck.",
+                    pygame.key.name(key), duration,
+                )
+                return []
+            action = ARROW_ACTIONS[View.SONG_VIEW][key]
+            LOGGER.debug(
+                "KEYUP %s nach %.0f ms. Aktion %s.",
+                pygame.key.name(key), duration, action.name,
+            )
+            return [action]
 
-        if self._down_since is None:
-            LOGGER.debug("KEYUP Arrow Down ohne zugehörigen KEYDOWN.")
+        if getattr(event, "repeat", False) or key in self._arrows_down:
             return []
-        duration_ms = now_ms - self._down_since
-        if self._shutdown_fired:
-            action = None
-        elif duration_ms < self.config.shutdown_hold_ms:
-            action = Action.NEXT_PAGE
-        else:
-            action = Action.SHUTDOWN if self._hold_confirmed else None
-        self._reset_hold()
-        LOGGER.debug(
-            "KEYUP Arrow Down nach %.0f ms. Aktion %s.",
-            duration_ms,
-            action.name if action is not None else "keine",
-        )
+        if key in ARROW_ACTIONS[view]:
+            self._arrows_down.add(key)
+            if view is View.SONG_VIEW and key in self._long_actions:
+                self._holds[key] = now_ms
+                LOGGER.debug("KEYDOWN %s.", pygame.key.name(key))
+                return []
+        action = action_for_key(event, view)
         return [action] if action is not None else []

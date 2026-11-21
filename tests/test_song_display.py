@@ -9,7 +9,7 @@ from lyricspi.app import run
 from lyricspi.config import Config, DisplayConfig, PROJECT_ROOT, SongsConfig
 from lyricspi.layout import Page
 from lyricspi.renderer import Renderer, TRACK_COLOR, progress_position
-from lyricspi.setlist import Song
+from lyricspi.setlist import Setlist, Song
 from lyricspi.song_loader import load_songs
 
 
@@ -20,6 +20,116 @@ def renderer(monkeypatch: pytest.MonkeyPatch) -> Iterator[Renderer]:
         yield Renderer(DisplayConfig())
     finally:
         pygame.quit()
+
+
+@pytest.mark.parametrize("selected", [0, 5000, 9999])
+def test_song_list_draws_only_visible_entries(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch, selected: int
+) -> None:
+    pygame.display.set_mode((450, 185))
+    setlist = Setlist(tuple(
+        Song(index, f"{index:05}_Lied.txt", Path(), "Lied", "")
+        for index in range(10_000)
+    ))
+    blocks = []
+    draw_block = renderer._draw_menu_block
+
+    def capture(
+        page: Page, font: pygame.font.Font, area: pygame.Rect, *,
+        selected: bool = False,
+    ) -> None:
+        height = renderer._page_height(page, font)
+        bounds = pygame.Rect(area.left, area.top, area.width, height)
+        blocks.append((page, bounds, selected))
+        draw_block(page, font, area, selected=selected)
+
+    monkeypatch.setattr(renderer, "_draw_menu_block", capture)
+    assert renderer.draw_song_list(setlist, selected, 24) == 1
+
+    area = renderer._content_area()
+    assert blocks[0][0] == ("Songliste",)
+    assert all(area.contains(bounds) for _, bounds, _ in blocks)
+    assert 1 < len(blocks) - 1 < 10
+    displayed = [int(page[0].split()[0]) for page, _, _ in blocks[1:]]
+    assert displayed == list(range(displayed[0], displayed[-1] + 1))
+    highlights = [index for index, (_, _, active) in enumerate(blocks) if active]
+    assert len(highlights) == 1
+    assert displayed[highlights[0] - 1] == selected
+    x, y = blocks[highlights[0]][1].bottomright
+    assert renderer.screen.get_at((x - 1, y - 1)) == pygame.Color("white")
+    assert renderer.screen.get_at((0, 0)) == pygame.Color("black")
+
+
+def test_menu_wraps_and_pages_without_shrinking_at_maximum_font_size(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pygame.display.set_mode((400, 260))
+    size = DisplayConfig().font_max
+    font = renderer._font_for_size(size)
+    font_for_size = Mock(wraps=renderer._font_for_size)
+    monkeypatch.setattr(renderer, "_font_for_size", font_for_size)
+    blocks = []
+    draw_block = renderer._draw_menu_block
+
+    def capture(
+        page: Page, used_font: pygame.font.Font, area: pygame.Rect, *,
+        selected: bool = False,
+    ) -> None:
+        assert used_font is font
+        assert all(font.size(line)[0] <= area.width for line in page)
+        assert renderer._page_height(page, font) <= area.height
+        blocks.extend(page)
+        draw_block(page, used_font, area, selected=selected)
+
+    monkeypatch.setattr(renderer, "_draw_menu_block", capture)
+    count = renderer.draw_main_menu(size)
+    assert count > 1
+    for page_index in range(1, count):
+        assert renderer.draw_main_menu(size, page_index) == count
+    assert "".join(" ".join(blocks).split()) == (
+        "ASchriftkleinerBSchriftgrößerCAlleSongsauflistenDZumSongzurück"
+    )
+    assert font_for_size.call_args_list == [call(size)] * count
+
+
+def test_empty_song_list_shows_notice_with_global_font(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    draw_block = Mock(wraps=renderer._draw_menu_block)
+    monkeypatch.setattr(renderer, "_draw_menu_block", draw_block)
+    assert renderer.draw_song_list(Setlist(), 0, 48) == 1
+    assert draw_block.call_args.args[0] == ("Songliste", "Keine Songs geladen")
+    assert draw_block.call_args.args[1] is renderer._font_for_size(48)
+
+
+def test_song_list_rewraps_long_title_with_the_global_font(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pygame.display.set_mode((480, 260))
+    title = "Ein besonders langer Titel mit vielen gut lesbaren Wörtern"
+    songs = Setlist((Song(1, "01_Lied.txt", Path(), title, "Text"),))
+    draw_block = Mock(wraps=renderer._draw_menu_block)
+    monkeypatch.setattr(renderer, "_draw_menu_block", draw_block)
+
+    assert renderer.draw_song_list(songs, 0, 24) == 1
+    small_rows = draw_block.call_args.args[0]
+    assert draw_block.call_args.args[1] is renderer._font_for_size(24)
+    draw_block.reset_mock()
+
+    count = renderer.draw_song_list(songs, 0, 96)
+    assert count > 1
+    for page_index in range(1, count):
+        renderer.draw_song_list(songs, 0, 96, page_index)
+    rows = []
+    for args, kwargs in draw_block.call_args_list:
+        page, font, area = args
+        assert kwargs["selected"]
+        assert font is renderer._font_for_size(96)
+        assert renderer._page_height(page, font) <= area.height
+        assert all(font.size(line)[0] <= area.width for line in page)
+        rows.extend(page)
+    assert len(rows) > len(small_rows)
+    assert "".join(" ".join(rows).split()) == "".join(f"01{title}".split())
 
 
 def test_demo_songs_have_distinct_lengths_and_fill_multiple_pages(
@@ -66,7 +176,7 @@ def test_page_layout_reserves_header_and_progress_gutter(
     paginate = Mock(wraps=renderer._paginate)
     monkeypatch.setattr(renderer, "_paginate", paginate)
     renderer.layout("Text", 48)
-    paginate.assert_called_once_with("Text", 48, lyrics)
+    paginate.assert_called_once_with("Text", 48, lyrics, page_starts=None)
 
 
 @pytest.mark.parametrize(
@@ -142,11 +252,12 @@ def test_plus_and_minus_resize_every_song_text_element(
         "[Strophe 1]\nErste Zeile", encoding="utf-8"
     )
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    keys = iter((pygame.K_PLUS, pygame.K_MINUS, pygame.K_ESCAPE))
-    monkeypatch.setattr(
-        pygame.event, "get",
-        lambda: [pygame.event.Event(pygame.KEYDOWN, key=next(keys))],
-    )
+    batches = iter([
+        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_PLUS)],
+        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_MINUS)],
+        [pygame.event.Event(pygame.QUIT)],
+    ])
+    monkeypatch.setattr(pygame.event, "get", lambda: next(batches))
     draw = Renderer.draw
     drawn_sizes = []
 

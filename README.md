@@ -28,18 +28,6 @@ py -3.13 -m venv .venv
 In einer aktivierten `.venv` genügt `python -m lyricspi.main`. Die
 Anwendung protokolliert Tastaturaktionen im Entwicklungsmodus im Terminal.
 
-| Taste | Wirkung |
-| --- | --- |
-| Pfeil links / rechts | Wechselt zum vorherigen / nächsten Song, jeweils auf Seite 1 |
-| Pfeil hoch / runter (kurz) | Blättert zurück / beim Loslassen weiter |
-| Pfeil runter (mindestens 15 Sekunden halten) | Beendet LyricsPi |
-| Minus / Plus | Verkleinert / vergrößert die Schrift innerhalb der konfigurierten Grenzen |
-| Escape | Beendet das Programm im Entwicklungsmodus |
-
-Nach dem letzten Song folgt wieder der erste. Vom ersten Song führt Pfeil
-links zum letzten. Beim Blättern bleibt die Anzeige auf der ersten bzw.
-letzten Seite stehen.
-
 Die feste Kopfzeile zeigt links den Songtitel und rechts die Songnummer
 aus dem Dateinamen samt führender Nullen. Titel, Nummer, Songtext und
 Abschnittsmarker verwenden dieselbe Schriftgröße. Plus und Minus ändern
@@ -49,11 +37,11 @@ beginnen darunter. Der Balken links zeigt die Position innerhalb des
 Songs. Seine Markierung steht auf der ersten Seite oben und auf der
 letzten Seite unten. Bei einem einseitigen Song steht sie mittig.
 
-Lange Zeilen werden entsprechend der Fensterbreite umgebrochen. Strophen
-bleiben nach Möglichkeit zusammen. Zu lange Strophen werden auf mehrere
-Seiten verteilt. Nach einer Schrift- oder Fenstergrößenänderung berechnet
-LyricsPi die Seiten neu und behält den ausgewählten Song bei. Falls die
-bisherige Seite entfällt, zeigt LyricsPi die letzte verfügbare Seite.
+Lange Zeilen werden entsprechend der Fensterbreite umgebrochen. LyricsPi
+füllt jede Seite mit vollständigen Zeilen. Strophen, Refrains und
+Abschnittsmarker können über Seitengrenzen hinweg dargestellt werden.
+Nach einer Schrift- oder Fenstergrößenänderung berechnet LyricsPi die
+Seiten neu und zeigt die Seite mit der bisherigen Textposition an.
 Ist das Fenster zu klein für Songtext, zeigt es einen Hinweis.
 
 Für Akkorde verwendet LyricsPi bevorzugt eine Monospace-Systemschrift.
@@ -63,45 +51,50 @@ Akkord- und Textzeilen an unterschiedlichen Stellen umbrechen, können sich
 die Akkorde relativ zum Text verschieben. Ist keine der unterstützten
 Monospace-Schriften installiert, verwendet Pygame seine Standardschrift.
 
-## M-VAVE-Fußcontroller
+## Bedienung mit Fußcontroller und Tastatur
 
 Verbinde den M-VAVE per USB im Tastaturmodus (HID) und gib dem
 LyricsPi-Fenster den Tastaturfokus. Die Fußtasten senden dieselben
 Pfeiltasten wie eine normale Tastatur.
 
-| Fußtaste | Tastatursignal | Funktion |
-| --- | --- | --- |
-| A | Pfeil hoch | Vorherige Seite |
-| B (kurz) | Pfeil runter | Beim Loslassen genau eine Seite weiter |
-| B (mindestens 15 Sekunden halten) | Pfeil runter | LyricsPi beenden |
-| C | Pfeil links | Vorheriger Song |
-| D | Pfeil rechts | Nächster Song |
+| Fußtaste | Tastatursignal | Songansicht (`SONG_VIEW`) | Hauptmenü (`MAIN_MENU`) | Songliste (`SONG_LIST`) |
+| --- | --- | --- | --- | --- |
+| A | Pfeil hoch | Kurz zum vorherigen Song. Ab 5 Sekunden Hauptmenü öffnen. | Schrift verkleinern | Auswahl nach oben |
+| B | Pfeil runter | Kurz zum nächsten Song. Ab 15 Sekunden herunterfahren oder LyricsPi beenden. | Schrift vergrößern | Auswahl nach unten |
+| C | Pfeil links | Vorherige Seite | Songliste öffnen | Markierten Song auf Seite 1 öffnen |
+| D | Pfeil rechts | Nächste Seite | Zur vorherigen Songansicht zurückkehren | Zurück zum Hauptmenü |
 
-A, C und D reagieren beim Drücken. Die bisherigen Tastenkombinationen
-entfallen. Die Schriftgröße änderst du mit Plus und Minus auf der Tastatur.
-Da Pygame dieselben Tastaturereignisse für beide Geräte liefert, gilt der
-lange Druck auch für Pfeil runter auf der normalen Tastatur.
+In der Songansicht lösen A und B ihren Kurzdruck beim Loslassen aus.
+C und D sowie die Menütasten reagieren beim Drücken. Ein ausgelöster
+Langdruck verbraucht den Tastendruck. Der Songwechsel beginnt auf Seite 1
+und läuft in beide Richtungen zwischen erstem und letztem Song um.
+Beim Blättern bleibt die Anzeige an der ersten bzw. letzten Seite stehen.
 
-Für einen kurzen Druck braucht LyricsPi ein zusammengehöriges `KEYDOWN`
-und `KEYUP`. Für das lange Halten muss das Betriebssystem Pfeil runter
-durchgehend als gedrückt melden. Sendet der M-VAVE beim Halten nur kurze
-HID-Impulse, ist die Beenden-Funktion mit diesem Controller nicht verfügbar.
-Autorepeat verlängert oder startet die Messung nicht neu. Bei Fokusverlust
-oder wenn der gemeldete Tastenzustand ohne `KEYUP` endet, verwirft LyricsPi
-die Messung. Im Entwicklungsmodus protokolliert das Terminal
-`KEYDOWN Arrow Down`, `KEYUP Arrow Down`, die gemessene Haltezeit und die Aktion.
+Songtext, Kopfzeile, Hauptmenü und Songliste verwenden dieselbe Schriftgröße.
+Im Hauptmenü ändern A und B die Schrift sofort sichtbar. Die Änderung gilt
+bis zum Programmende, auch bei Bedienung mit Plus oder Minus auf der Tastatur.
+Die Songliste zeigt Nummer und Titel in numerischer Reihenfolge und markiert
+die Auswahl. Lange Einträge werden umgebrochen. Wenn das Hauptmenü oder ein
+markierter Titel mehrere Bildschirmseiten braucht, wechselt die Anzeige
+automatisch weiter. Die Tasten bleiben dabei direkt bedienbar.
+Mit D aus der Songliste und erneut D im Hauptmenü kehrst du zur bisherigen
+Textstelle zurück. Escape beendet LyricsPi im Windows-Entwicklungsmodus.
 
-Unter Windows und im Entwicklungsmodus beendet ein langer Druck LyricsPi
-über `EXIT`. Im eingerichteten Raspberry-Pi-Produktivmodus gibt LyricsPi
-zuerst die Anzeige frei und fordert anschließend über logind das reguläre
-Herunterfahren an.
+Für einen Langdruck muss das Betriebssystem die Pfeiltaste durchgehend
+als gedrückt melden. Bei kurzen HID-Impulsen stehen die Langdruckfunktionen
+nur über eine Tastatur mit tatsächlich gehaltenen Tasten zur Verfügung.
+Autorepeat wird ignoriert. Bei Fokusverlust oder wenn der gemeldete
+Tastenzustand ohne `KEYUP` endet, verwirft LyricsPi die Messung.
+Das Debug-Protokoll enthält die Tastenereignisse und gemessenen Haltezeiten.
 
-Für die Hardwareabnahme starte LyricsPi im Entwicklungsmodus mit einem
-mehrseitigen Song und prüfe A, B, C und D. Drücke B zunächst kurz und prüfe,
-dass beim Loslassen genau eine Seite weitergeblättert wird. Halte B dann
-mindestens 15 Sekunden. LyricsPi soll sich dabei ohne Seitenwechsel schließen.
-Wenn sich die Anwendung nicht schließt, prüfe im Terminal, ob der Controller
-beim Halten vorzeitig `KEYUP` sendet.
+Auf dem Raspberry Pi im Produktivmodus gibt LyricsPi bei langem B zuerst
+die Anzeige frei und fordert anschließend über logind das reguläre
+Herunterfahren an. Unter Windows und im Entwicklungsmodus endet nur die
+Anwendung. Der Langdruck beginnt bei 15 Sekunden, sofern die Konfiguration
+keine längere Haltedauer vorgibt.
+
+Die Schritte zur Hardwareabnahme stehen in der Installationsanleitung.
+[HDMI, Stick und Controller abnehmen](docs/raspberry-pi-installation.md#4-hdmi-stick-und-controller-abnehmen)
 
 ## Konfiguration
 
@@ -122,11 +115,11 @@ Fehlermeldung im Terminal.
   in ganzen Prozent (0–49) und zusätzlichen Zeilenabstand
   (`line_spacing`, standardmäßig 4 Pixel). Mit `fullscreen: true` startet
   die Anwendung im Vollbild bei Desktop-Auflösung.
-- `system.development_mode` aktiviert Tastaturprotokollierung und das
-  Beenden per Escape. In diesem Modus lässt sich die Fenstergröße ändern.
+- `system.development_mode` aktiviert Tastaturprotokollierung und unter
+  Windows das Beenden per Escape. In diesem Modus lässt sich die Fenstergröße ändern.
   `system.allow_keyboard` steuert die Tastatur insgesamt.
   `system.show_splash` wird eingelesen und validiert.
-- Änderungen der Schriftgröße per Tastatur gelten bis zum Programmende.
+- Änderungen der Schriftgröße im Menü oder per Tastatur gelten bis zum Programmende.
 
 Unter `input` steht `shutdown_key` auf `"down"` für Pfeil runter.
 `shutdown_hold_ms` legt die Haltedauer fest. Der Standard und zugleich

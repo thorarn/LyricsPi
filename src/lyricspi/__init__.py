@@ -10,5 +10,17 @@ class Action(Enum):
     NEXT_PAGE = auto()
     FONT_SMALLER = auto()
     FONT_LARGER = auto()
+    OPEN_MENU = auto()
+    OPEN_SONG_LIST = auto()
+    BACK = auto()
+    SELECT_PREVIOUS = auto()
+    SELECT_NEXT = auto()
+    OPEN_SELECTED_SONG = auto()
     EXIT = auto()
     SHUTDOWN = auto()
+
+
+class View(Enum):
+    SONG_VIEW = auto()
+    MAIN_MENU = auto()
+    SONG_LIST = auto()

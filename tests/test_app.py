@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pygame
 import pytest
 
-from lyricspi import Action
+from lyricspi import Action, View
 from lyricspi import app
 from lyricspi.app import AppState, run
 from lyricspi.config import (
@@ -54,14 +54,19 @@ def test_song_draws_resizes_logs_navigation_and_exits(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr(app, "platform", "win32")
     batches = iter(
         [
             [
-                pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RIGHT),
+                pygame.event.Event(pygame.KEYDOWN, key=pygame.K_DOWN),
+                pygame.event.Event(pygame.KEYUP, key=pygame.K_DOWN),
                 pygame.event.Event(pygame.KEYDOWN, key=pygame.K_PLUS),
             ],
             [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_MINUS)],
-            [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_LEFT)],
+            [
+                pygame.event.Event(pygame.KEYDOWN, key=pygame.K_UP),
+                pygame.event.Event(pygame.KEYUP, key=pygame.K_UP),
+            ],
             [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
         ]
     )
@@ -103,6 +108,7 @@ def test_escape_gate_allows_window_close(
     monkeypatch: pytest.MonkeyPatch, system: SystemConfig
 ) -> None:
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr(app, "platform", "win32")
     batches = iter(
         [
             [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
@@ -112,6 +118,22 @@ def test_escape_gate_allows_window_close(
     monkeypatch.setattr(pygame.event, "get", lambda: next(batches))
 
     run(Config(system=system))
+
+    assert next(batches, None) is None
+
+
+def test_escape_is_ignored_in_linux_development_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr(app, "platform", "linux")
+    batches = iter([
+        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
+        [pygame.event.Event(pygame.QUIT)],
+    ])
+    monkeypatch.setattr(pygame.event, "get", lambda: next(batches))
+
+    run(Config())
 
     assert next(batches, None) is None
 
@@ -208,17 +230,17 @@ def test_page_layout_follows_font_and_window_changes(
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     steps = iter(
         [
-            ([pygame.K_DOWN], None),
-            ([pygame.K_UP], None),
-            ([pygame.K_DOWN] * 20, None),
-            ([pygame.K_DOWN, pygame.K_MINUS], None),
+            ([pygame.K_RIGHT], None),
+            ([pygame.K_LEFT], None),
+            ([pygame.K_RIGHT] * 20, None),
+            ([pygame.K_RIGHT, pygame.K_MINUS], None),
             ([], (640, 720)),
             ([], (10, 5)),
             ([], (640, 720)),
-            ([pygame.K_RIGHT], None),
-            ([pygame.K_RIGHT], None),
-            ([pygame.K_LEFT], None),
-            ([pygame.K_ESCAPE], None),
+            ([pygame.K_DOWN], None),
+            ([pygame.K_DOWN], None),
+            ([pygame.K_UP], None),
+            (None, None),
         ]
     )
     frames: list[tuple[int, Page, str | None]] = []
@@ -235,6 +257,8 @@ def test_page_layout_follows_font_and_window_changes(
 
     def get_events() -> list[pygame.event.Event]:
         keys, size = next(steps)
+        if keys is None:
+            return [pygame.event.Event(pygame.QUIT)]
         events = [
             pygame.event.Event(event_type, key=key)
             for key in keys
@@ -303,25 +327,26 @@ def test_renderer_keeps_all_glyphs_inside_content_area(
         pygame.quit()
 
 
-def test_short_b_turns_page_and_logs_hid_events(
+def test_short_b_changes_song_and_logs_hid_events(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     path = tmp_path / "1_Lied.txt"
     path.write_text("Erste Seite\nZweite Seite", encoding="utf-8")
+    (tmp_path / "2_Zweiter.txt").write_text("Zweiter Song", encoding="utf-8")
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     batches = iter([
         [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_DOWN)],
         [pygame.event.Event(pygame.KEYUP, key=pygame.K_DOWN)],
-        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
+        [pygame.event.Event(pygame.QUIT)],
     ])
     times_ns = iter([0, 200_000_000, 300_000_000])
     pressed = {pygame.K_DOWN: False}
 
     def events() -> list[pygame.event.Event]:
         batch = next(batches)
-        if batch[0].key == pygame.K_DOWN:
+        if batch[0].type != pygame.QUIT:
             pressed[pygame.K_DOWN] = batch[0].type == pygame.KEYDOWN
         return batch
 
@@ -335,10 +360,177 @@ def test_short_b_turns_page_and_logs_hid_events(
 
     assert [message for message in caplog.messages if message.startswith("Seite ")] == [
         "Seite 1/2",
-        "Seite 2/2",
+        "Seite 1/1",
     ]
-    assert "KEYDOWN Arrow Down." in caplog.messages
-    assert "KEYUP Arrow Down nach 200 ms. Aktion NEXT_PAGE." in caplog.messages
+    assert "KEYDOWN down." in caplog.messages
+    assert "KEYUP down nach 200 ms. Aktion NEXT_SONG." in caplog.messages
+
+
+def test_controller_menu_restores_text_position_and_selects_songs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines = tuple(f"Zeile {number}" for number in range(40))
+    for filename, content in (
+        ("10_Dritter.txt", "Dritter Song"),
+        ("2_Zweiter.txt", "Zweiter Song"),
+        ("01_Erster.txt", "\n".join(lines)),
+    ):
+        (tmp_path / filename).write_text(content, encoding="utf-8")
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    a, b, c, d = pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT
+    down, up = pygame.KEYDOWN, pygame.KEYUP
+
+    def tap(key: int) -> list[tuple[int, int]]:
+        return [(down, key), (up, key)]
+
+    steps = iter([
+        (100, tap(d)),
+        (200, [(down, a)]),
+        (5200, []),
+        (5300, [(up, a), *tap(a)]),
+        (5350, [*tap(b), *tap(b)]),
+        (5400, [*tap(c), *tap(b)]),
+        (5500, tap(d)),
+        (5600, tap(d)),
+        (5700, [(down, a)]),
+        (10700, []),
+        (10800, [(up, a), *tap(c), *tap(b), *tap(b), *tap(a)]),
+        (10900, tap(c)),
+        (11000, None),
+    ])
+    pressed: dict[int, bool] = {}
+    now_ms = 0
+    frames = []
+    menu_font_heights: list[int] = []
+    draw = app._draw
+
+    def events() -> list[pygame.event.Event]:
+        nonlocal now_ms
+        now_ms, keys = next(steps)
+        if keys is None:
+            return [pygame.event.Event(pygame.QUIT)]
+        batch = []
+        for event_type, key in keys:
+            pressed[key] = event_type == down
+            batch.append(pygame.event.Event(event_type, key=key))
+        return batch
+
+    def capture(
+        state: AppState, renderer: Renderer, notice: str | None, *,
+        view_page: int = 0,
+    ) -> int:
+        font = Mock(wraps=renderer._font_for_size)
+        with monkeypatch.context() as frame_patch:
+            frame_patch.setattr(renderer, "_font_for_size", font)
+            page_count = draw(state, renderer, notice, view_page=view_page)
+        font.assert_called_once_with(state.font_size)
+        if state.view is View.MAIN_MENU:
+            menu_font_heights.append(font(state.font_size).get_height())
+        assert state.song is not None
+        frames.append((
+            state.view, state.song.title, state.navigation.page_index,
+            state.page, state.font_size, state.selected_song,
+        ))
+        return page_count
+
+    monkeypatch.setattr(app, "_draw", capture)
+    monkeypatch.setattr(app, "monotonic_ns", lambda: now_ms * 1_000_000)
+    monkeypatch.setattr(pygame.event, "get", events)
+    monkeypatch.setattr(pygame.key, "get_focused", lambda: True)
+    monkeypatch.setattr(pygame.key, "get_pressed", lambda: pressed)
+    run(Config(
+        display=DisplayConfig(window_width=640, window_height=320),
+        songs=SongsConfig(directory=str(tmp_path)),
+    ))
+
+    (
+        initial, second_page, main, smaller, resized, song_list, back, resumed,
+        reopened, selected, new_song,
+    ) = frames
+    assert initial[0:3] == (View.SONG_VIEW, "Erster", 0)
+    assert second_page[0:3] == (View.SONG_VIEW, "Erster", 1)
+    assert main[1:5] == second_page[1:5]
+    assert all(
+        frame[0] is View.MAIN_MENU for frame in (main, smaller, resized, back, reopened)
+    )
+    assert (main[4], smaller[4], resized[4]) == (48, 44, 52)
+    assert menu_font_heights[1] < menu_font_heights[0] < menu_font_heights[2]
+    assert song_list[0] is selected[0] is View.SONG_LIST
+    assert song_list[-1] == selected[-1] == 1
+    assert song_list[1:5] == back[1:5] == resized[1:5]
+    assert resumed[0:2] == (View.SONG_VIEW, "Erster")
+    assert second_page[3][0] in resumed[3]
+    assert new_song[0:5] == (View.SONG_VIEW, "Zweiter", 0, ("Zweiter Song",), 52)
+
+
+def test_large_menu_advances_pages_and_keeps_direct_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    a, c, d = pygame.K_UP, pygame.K_LEFT, pygame.K_RIGHT
+    down, up = pygame.KEYDOWN, pygame.KEYUP
+    steps = iter([
+        (0, [(down, a)]),
+        (5000, []),
+        (5001, [(up, a)]),
+        (5000 + app.VIEW_PAGE_DURATION_MS, []),
+        (5001 + app.VIEW_PAGE_DURATION_MS, [(down, c), (up, c)]),
+        (5002 + app.VIEW_PAGE_DURATION_MS, [(down, d), (up, d)]),
+        (5003 + app.VIEW_PAGE_DURATION_MS, [(down, d), (up, d)]),
+        (5004 + app.VIEW_PAGE_DURATION_MS, None),
+    ])
+    pressed = {}
+    now_ms = 0
+    shown: list[tuple[View, int]] = []
+    draw = app._draw
+
+    def events() -> list[pygame.event.Event]:
+        nonlocal now_ms
+        now_ms, keys = next(steps)
+        if keys is None:
+            return [pygame.event.Event(pygame.QUIT)]
+        for event_type, key in keys:
+            pressed[key] = event_type == down
+        return [pygame.event.Event(event_type, key=key) for event_type, key in keys]
+
+    def capture(
+        state: AppState, renderer: Renderer, notice: str | None, *,
+        view_page: int = 0,
+    ) -> int:
+        shown.append((state.view, view_page))
+        return draw(state, renderer, notice, view_page=view_page)
+
+    monkeypatch.setattr(app, "_draw", capture)
+    monkeypatch.setattr(app, "monotonic_ns", lambda: now_ms * 1_000_000)
+    monkeypatch.setattr(pygame.event, "get", events)
+    monkeypatch.setattr(pygame.key, "get_focused", lambda: True)
+    monkeypatch.setattr(pygame.key, "get_pressed", lambda: pressed)
+    run(Config(display=DisplayConfig(
+        window_width=400, window_height=260, font_size=96,
+    )))
+
+    assert shown == [
+        (View.SONG_VIEW, 0), (View.MAIN_MENU, 0), (View.MAIN_MENU, 1),
+        (View.SONG_LIST, 0), (View.MAIN_MENU, 0), (View.SONG_VIEW, 0),
+    ]
+
+
+def test_empty_song_list_can_be_aborted() -> None:
+    state = AppState(48, development_mode=True)
+    display = DisplayConfig()
+    for action in (
+        Action.OPEN_MENU, Action.OPEN_SONG_LIST, Action.SELECT_NEXT,
+        Action.SELECT_PREVIOUS, Action.OPEN_SELECTED_SONG,
+    ):
+        state.apply_action(action, display)
+
+    assert state.view is View.SONG_LIST
+    assert state.song is None
+    assert state.selected_song == 0
+    state.apply_action(Action.BACK, display)
+    assert state.view is View.MAIN_MENU
+    state.apply_action(Action.BACK, display)
+    assert state.view is View.SONG_VIEW
 
 
 @pytest.mark.parametrize(
@@ -417,7 +609,7 @@ def test_splash_transitions_to_song_and_processes_input(
     batches = iter([
         [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_PLUS)],
         [],
-        [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)],
+        [pygame.event.Event(pygame.QUIT)],
     ])
     times_ns = iter([0, 200_000_000, 1_500_000_000, 1_600_000_000])
     frames: list[pygame.Surface] = []

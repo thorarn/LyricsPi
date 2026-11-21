@@ -86,6 +86,17 @@ def test_wrapped_rows_are_paginated_individually_in_order() -> None:
     assert pages == (("ABC", "DEF"), ("GHI", ""), ("JKL",))
 
 
+def test_page_start_tracks_source_line_and_wrapped_column() -> None:
+    starts = []
+    content = "ABCDEFGHI\n\nJKL\n\n\n"
+    assert paginate(content, 3, 2, measure, 1, 0, page_starts=starts) == (
+        ("ABC", "DEF"), ("GHI", ""), ("JKL", ""),
+    )
+    assert starts == [(0, 0), (0, 6), (2, 0)]
+    paginate(content, 4, 1, measure, 1, 0, page_starts=starts)
+    assert starts == [(0, 0), (0, 4), (0, 8), (1, 0), (2, 0)]
+
+
 def test_splits_long_stanza_and_omits_blank_pages_at_end() -> None:
     content = "\n".join(f"Zeile {number}" for number in range(100))
     pages = paginate(content + "\n\n\n\n", 30, 7, measure, 1, 0)

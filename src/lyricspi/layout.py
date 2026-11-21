@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 
 
 Page = tuple[str, ...]
+TextPosition = tuple[int, int]
 MeasureText = Callable[[str], tuple[int, int]]
 
 
@@ -11,9 +12,11 @@ class LayoutTooSmall(ValueError):
     """At least one character or line does not fit the available area."""
 
 
-def _wrap_line(line: str, width: int, measure: MeasureText) -> Iterator[str]:
+def _wrap_line(
+    line: str, width: int, measure: MeasureText
+) -> Iterator[tuple[int, str]]:
     if not line.strip():
-        yield line
+        yield 0, line
         return
 
     start = 0
@@ -47,7 +50,7 @@ def _wrap_line(line: str, width: int, measure: MeasureText) -> Iterator[str]:
                         if line[start:index].strip():
                             end = next_start = index + 1
                         break
-        yield line[start:end]
+        yield start, line[start:end]
         start = next_start
 
 
@@ -58,6 +61,8 @@ def paginate(
     measure: MeasureText,
     line_height: int,
     line_spacing: int,
+    *,
+    page_starts: list[TextPosition] | None = None,
 ) -> tuple[Page, ...]:
     """Fill each page with consecutive complete rows."""
     if width < 1 or height < line_height:
@@ -68,10 +73,11 @@ def paginate(
     pages: list[Page] = []
     page: list[str] = []
     used = 0
-    for line in content.splitlines():
+    starts: list[TextPosition] = []
+    for line_number, line in enumerate(content.splitlines()):
         # Tabs use four-column stops. SDL_ttf cannot render embedded NULs.
         display_line = line.expandtabs(4).replace("\x00", "\ufffd")
-        for row in _wrap_line(display_line, width, measure):
+        for column, row in _wrap_line(display_line, width, measure):
             row_height = line_height
             if row.strip():
                 row_height = max(line_height, measure(row)[1])
@@ -82,6 +88,8 @@ def paginate(
                 pages.append(tuple(page))
                 page.clear()
                 used = 0
+            if not page and page_starts is not None:
+                starts.append((line_number, column))
             page.append(row)
             used += cost
 
@@ -90,4 +98,6 @@ def paginate(
     # Keep blank rows inside the song, including across a page boundary.
     while pages and not any(row.strip() for row in pages[-1]):
         pages.pop()
+    if page_starts is not None:
+        page_starts[:] = starts[:len(pages)]
     return tuple(pages)
