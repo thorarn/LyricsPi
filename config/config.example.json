@@ -1,0 +1,19 @@
+{
+  "display": {
+    "fullscreen": false,
+    "window_width": 1280,
+    "window_height": 720,
+    "font_size": 48,
+    "font_min": 24,
+    "font_max": 96,
+    "font_step": 4,
+    "foreground": "#FFFFFF",
+    "background": "#000000",
+    "margin_percent": 5
+  },
+  "system": {
+    "development_mode": true,
+    "allow_keyboard": true,
+    "show_splash": false
+  }
+}

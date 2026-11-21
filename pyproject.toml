@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lyricspi"
+version = "1.0.0.dev0"
+description = "Offline-Songtext-Prompter für Live-Auftritte"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["pygame>=2.6.1,<3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
