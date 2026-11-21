@@ -1,16 +1,30 @@
-# LyricsPi auf dem Raspberry Pi 3 installieren
+# LyricsPi auf dem Raspberry Pi 2 und 3 installieren
 
-Das M6-Deployment ist für Raspberry Pi 3 Model B, B+ und A+ mit Raspberry Pi
-OS Lite **32 Bit** auf Basis von Debian Trixie ausgelegt. Der Installer prüft
-Modell, Debian-Basis und `armhf` vor Änderungen am System. Für die Abnahme
-werden ein HDMI-Monitor, ein USB-Stick und ein M-VAVE im USB-HID-Modus
-benötigt. Bei zu wenigen USB-Anschlüssen kann ein aktiver USB-Hub helfen.
-[Raspberry Pi OS Lite](https://www.raspberrypi.com/software/operating-systems/)
+Der Installer akzeptiert Raspberry Pi 2 Model B (Revisionen 1.1, 1.2 und
+1.3) sowie Raspberry Pi 3 Model B, B+ und A+. Pi 2 Rev. 1.1 verwendet einen
+32-Bit-Cortex-A7. Die neueren Pi-2-Revisionen und der Pi 3 haben einen
+Cortex-A53. Für alle Modelle ist **Raspberry Pi OS Lite 32 Bit
+(`armhf`)** vorgesehen. Ein 64-Bit-Kernel auf einem Cortex-A53 wird
+akzeptiert, wenn der Userspace 32 Bit ist. Für die Abnahme werden ein
+HDMI-Monitor, ein USB-Stick und ein M-VAVE im USB-HID-Modus benötigt.
+[Raspberry-Pi-Hardware](https://www.raspberrypi.com/documentation/computers/sbcs.html)
+
+| Image | Python und Pygame aus der Distribution |
+| --- | --- |
+| Raspberry Pi OS Lite 32 Bit (Trixie, empfohlen) | Python 3.13, Pygame 2.6.1 |
+| Raspberry Pi OS Legacy Lite 32 Bit (Bookworm) | Python 3.11, Pygame 2.1.2 |
+
+Die Modell- und Paketwahl wurde mit simulierten Systemdaten und den
+Paketinformationen geprüft. Die Installation und der Betrieb auf echter
+Pi-2-Hardware stehen noch zur Abnahme aus. Das gilt auch für den
+Bookworm-Pfad.
+[Raspberry Pi OS Lite](https://www.raspberrypi.com/software/operating-systems/) · [Trixie-Paket](https://packages.debian.org/trixie/armhf/python3-pygame) · [Bookworm-Paket](https://packages.debian.org/bookworm/armhf/python3-pygame)
 
 ## 1. MicroSD und SSH vorbereiten
 
 1. In Raspberry Pi Imager das Pi-Modell und **Raspberry Pi OS Lite (32-bit)**
-   auswählen. Die gewünschte MicroSD-Karte auswählen und das Image schreiben.
+   auswählen. Für Bookworm die Variante **Legacy Lite (32-bit)** auswählen.
+   Die gewünschte MicroSD-Karte auswählen und das Image schreiben.
 2. In der Betriebssystemanpassung Benutzer, Hostname und bei Bedarf WLAN
    festlegen. SSH mit Schlüsselauthentifizierung aktivieren und den öffentlichen
    Schlüssel des Wartungsrechners hinterlegen.
@@ -21,7 +35,9 @@ benötigt. Bei zu wenigen USB-Anschlüssen kann ein aktiver USB-Hub helfen.
 ```bash
 ssh wartung@lyricspi.local
 tr -d '\000' </proc/device-tree/model; printf '\n'
+uname -m
 dpkg --print-architecture
+getconf LONG_BIT
 cat /etc/os-release
 ```
 
@@ -65,13 +81,15 @@ sudo systemctl status lyricspi.service
 sudo journalctl -b -u lyricspi.service -u media-lyricspi-USB.mount
 ```
 
-Der Installer installiert die Systempakete per APT. Er verwendet Debians
-ARM32-Paket `python3-pygame` samt SDL2 und erstellt eine lokale venv mit
-Zugriff auf die Systempakete. LyricsPi wird in diese venv installiert. Die
-Installation des Python-Projekts benötigt dadurch weder eine ARM32-Pygame-
-Wheel von PyPI noch eine Änderung der systemweiten Python-Paketumgebung.
-Der Installer prüft, ob die SDL-Bibliothek KMSDRM anbietet.
-[Debian-Paket für ARM32](https://packages.debian.org/trixie/armhf/python3-pygame)
+Der Installer installiert fehlende Systempakete per APT. Er prüft die
+System-Python-Version (mindestens 3.11) und verwendet `python3-pygame`
+samt SDL2 aus derselben Distribution. LyricsPi wird offline in eine venv
+mit Zugriff auf diese Systempakete installiert. Die Prüfung zeigt die
+Pygame- und SDL-Version und kontrolliert, ob SDL KMSDRM anbietet.
+Bookworm liefert DejaVu Sans Mono über `fonts-dejavu-core`. Auf Trixie
+kommt sie aus `fonts-dejavu-mono`. Der Windows-Entwicklungsmodus verwendet
+weiterhin Python 3.13 und Pygame ab 2.6.1.
+[Bookworm-setuptools](https://packages.debian.org/bookworm/armhf/python3-setuptools) · [Bookworm-Schriftpaket](https://packages.debian.org/bookworm/all/fonts-dejavu-core/filelist)
 
 - [deploy/install.sh](../deploy/install.sh) installiert Anwendung, venv,
   Produktionskonfiguration, Systembenutzer, Service, Mount-Unit und
@@ -95,6 +113,11 @@ manuelle Start erfolgt mit dem oben gezeigten Befehl. Ein unerwarteter
 Absturz führt zu einem Neustart nach fünf Sekunden, mit höchstens drei
 Starts in zwei Minuten. Für einen erneuten Start nach einem behobenen
 Fehler kann der Zähler zurückgesetzt werden.
+
+Bei einem identischen Deployment mit funktionsfähiger venv und vorhandenen
+Systempaketen überspringt der Installer APT und die Neuinstallation. Der
+laufende Dienst bleibt dabei aktiv. Bei Änderungen gelten weiterhin die
+Sicherung und der explizite Start nach dem Update.
 
 ```bash
 sudo systemctl reset-failed lyricspi.service
@@ -155,6 +178,8 @@ sudo fgconsole
 Bei fehlender Anzeige zuerst HDMI-Eingang, Kabel und
 `dtoverlay=vc4-kms-v3d` in `/boot/firmware/config.txt` prüfen. Aufschluss
 geben die DRM-Connectoren mit Status `connected` und deren Datei `modes`.
+Für den Pi 2 und den Pi 3 gilt derselbe DRM/KMS-Pfad. Maßgeblich sind der
+tatsächlich verbundene Connector und seine Auflösung.
 Wenn SDL die falsche DRM-Karte verwendet, kann über
 `sudo systemctl edit lyricspi.service` eine Einstellung auf Basis der
 ermittelten Kartennummer gesetzt werden. Für den Connector an `card1`
@@ -194,6 +219,14 @@ SDL_VIDEODRIVER=x11 startx /opt/lyricspi/.venv/bin/python \
 Diese Diagnose verwendet die Demo-Songs und den Entwicklungsmodus mit
 Escape zum Beenden. Der Autostart und Poweroff werden mit dem regulären
 Dienst geprüft.
+
+Bei einem Abbruch des Installers zuerst die ausgegebenen Werte für Modell,
+Kernel, `armhf`, 32-Bit-Userspace und Debian-Codename prüfen. Bei
+Paketfehlern zeigt `apt-cache policy python3 python3-pygame libsdl2-2.0-0 python3-setuptools`
+die verfügbaren Versionen. Verwende die Paketquellen des installierten
+Images. Bei einer fehlgeschlagenen SDL-Prüfung zeigt der Installer die
+angebotenen Videotreiber. Für Fehler erst nach Dienststart das Journal und
+die DRM-Connector-Diagnose oben verwenden.
 
 ## 6. Aktualisieren oder zurückbauen
 
@@ -245,3 +278,8 @@ und dauerhafte Änderungen das Overlay zuerst deaktivieren und neu starten,
 die Änderungen durchführen und testen und erst danach wieder aktivieren.
 Der zusätzliche Schreibschutz für die Bootpartition ist separat wählbar.
 [Raspberry-Pi-Overlay-Dokumentation](https://www.raspberrypi.com/documentation/computers/configuration.html)
+
+## License
+
+LyricsPi is licensed under the MIT License.
+See [LICENSE](LICENSE) for details.

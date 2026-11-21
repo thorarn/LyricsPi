@@ -48,7 +48,7 @@ class Renderer:
 
     def load_splash_logo(self, path: Path) -> pygame.Surface | None:
         try:
-            return pygame.image.load(path).convert_alpha()
+            return pygame.image.load(str(path)).convert_alpha()
         except (OSError, pygame.error) as error:
             LOGGER.info("Startlogo %s nicht verfügbar: %s", path, error)
             return None

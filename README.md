@@ -1,7 +1,7 @@
 # LyricsPi
 
 LyricsPi ist ein Offline-Songtext-Prompter für Live-Auftritte auf dem
-Raspberry Pi 3. Unter Windows lädt LyricsPi beim Start die Setlist in den
+Raspberry Pi 2 und 3. Unter Windows lädt LyricsPi beim Start die Setlist in den
 Arbeitsspeicher und zeigt den ersten Song in einem Pygame-Fenster. Der
 Text ist standardmäßig weiß auf schwarzem Hintergrund und beginnt
 linksbündig am oberen Rand. Die Bedienung erfolgt per Tastatur oder
@@ -193,14 +193,16 @@ aktuellen Song, die Seite und die Gesamtseitenzahl.
 ## Tests ausführen
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+$lyricsPiTestTemp = Join-Path $env:TEMP ('lyricspi-test-' + [guid]::NewGuid().ToString('N'))
+.\.venv\Scripts\python.exe -m pytest --basetemp $lyricsPiTestTemp -p no:cacheprovider
 ```
 
 Die Songtests erzeugen temporäre Dateien und simulieren die USB-Erkennung.
 Die Anzeigetests verwenden den simulierten SDL-Videotreiber.
 Die HID-Tests verwenden simulierte Tastaturereignisse und Zeitpunkte.
+Die Installertests verwenden Bash, unter Windows beispielsweise Git Bash.
 
-## Raspberry Pi 3
+## Raspberry Pi 2 und 3
 
 Die [Installationsanleitung](docs/raspberry-pi-installation.md) beschreibt
 Raspberry Pi OS Lite, HDMI über DRM/KMS, den schreibgeschützten USB-Mount,

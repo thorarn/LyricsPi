@@ -80,15 +80,15 @@ def test_song_draws_resizes_logs_navigation_and_exits(
     original, larger, second, restored = screens
     assert original.get_size() == (1280, 720)
     assert original.get_at((0, 0)) == pygame.Color("#000000")
-    image_bytes = pygame.image.tobytes(original, "RGB")
+    image_bytes = pygame.image.tostring(original, "RGB")
     assert any(
         image_bytes[index : index + 3] == b"\xff\xff\xff"
         for index in range(0, len(image_bytes), 3)
     )
-    assert image_bytes != pygame.image.tobytes(larger, "RGB")
-    second_bytes = pygame.image.tobytes(second, "RGB")
-    assert second_bytes != pygame.image.tobytes(larger, "RGB")
-    assert image_bytes == pygame.image.tobytes(restored, "RGB")
+    assert image_bytes != pygame.image.tostring(larger, "RGB")
+    second_bytes = pygame.image.tostring(second, "RGB")
+    assert second_bytes != pygame.image.tostring(larger, "RGB")
+    assert image_bytes == pygame.image.tostring(restored, "RGB")
     assert "Tastaturaktion: NEXT_SONG" in caplog.text
     assert "Tastaturaktion: EXIT" in caplog.text
     assert not pygame.display.get_init()
@@ -401,7 +401,7 @@ def test_splash_transitions_to_song_and_processes_input(
         logo_path.parent.mkdir()
         image = pygame.Surface((12, 8))
         image.fill((255, 0, 0))
-        pygame.image.save(image, logo_path)
+        pygame.image.save(image, str(logo_path))
 
     batches = iter([
         [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_PLUS)],
@@ -436,12 +436,12 @@ def test_splash_transitions_to_song_and_processes_input(
 
     splash = frames[0]
     assert splash.get_at((0, 0)) == pygame.Color("black")
-    pixel_data = pygame.image.tobytes(splash, "RGB")
+    pixel_data = pygame.image.tostring(splash, "RGB")
     if has_logo:
         assert splash.get_at(splash.get_rect().center) == pygame.Color("red")
     else:
         assert b"\xff\xff\xff" in pixel_data
-    assert pygame.image.tobytes(frames[1], "RGB") == pixel_data
+    assert pygame.image.tostring(frames[1], "RGB") == pixel_data
     assert pages == [(52, ("Erster Songtext",))]
 
 
