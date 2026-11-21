@@ -25,5 +25,9 @@
     "extension": ".txt",
     "sort_mode": "numeric_prefix",
     "recursive": false
+  },
+  "input": {
+    "combo_window_ms": 150,
+    "enable_combinations": true
   }
 }

@@ -2,12 +2,13 @@
 
 import logging
 from dataclasses import dataclass, field
+from time import monotonic_ns
 
 import pygame
 
 from . import Action
 from .config import Config, DisplayConfig
-from .keyboard_controller import action_for_key
+from .keyboard_controller import KeyboardController
 from .layout import LayoutTooSmall, Page
 from .navigation import Navigation
 from .renderer import Renderer
@@ -93,6 +94,27 @@ def _draw(
     renderer.draw(state.font_size, state.page, notice)
 
 
+def _apply_keyboard_action(
+    action: Action, state: AppState, display: DisplayConfig, renderer: Renderer
+) -> bool:
+    LOGGER.debug("Tastaturaktion: %s", action.name)
+    if action is Action.EXIT and not state.development_mode:
+        return False
+    song = state.song
+    page_index = state.navigation.page_index
+    font_size = state.font_size
+    state.apply_action(action, display)
+
+    current_song = state.song
+    song_changed = song is not current_song
+    if song_changed and current_song is not None:
+        LOGGER.debug("Songwechsel: %s", current_song.filename)
+    if song_changed or font_size != state.font_size:
+        _update_layout(state, renderer)
+        return True
+    return page_index != state.navigation.page_index
+
+
 def run(config: Config) -> None:
     loaded = load_setlist(config.songs)
     state = AppState(
@@ -107,9 +129,13 @@ def run(config: Config) -> None:
             "Erster Song: %s (%s)", first_song.title, first_song.filename
         )
     notice = loaded.issue.value if loaded.issue is not None else None
+    keyboard = (
+        KeyboardController(config.input) if config.system.allow_keyboard else None
+    )
 
     try:
         renderer = Renderer(config.display, resizable=state.development_mode)
+        pygame.key.set_repeat()
         clock = pygame.time.Clock()
         size = renderer.screen.get_size()
         _update_layout(state, renderer)
@@ -117,37 +143,30 @@ def run(config: Config) -> None:
 
         while state.running:
             events = pygame.event.get()
+            now_ms = monotonic_ns() // 1_000_000
             new_size = renderer.screen.get_size()
             redraw = new_size != size
             if redraw:
                 size = new_size
                 _update_layout(state, renderer)
+            actions: list[Action] = []
             for event in events:
                 if event.type == pygame.QUIT:
                     state.apply_action(Action.EXIT, config.display)
+                    break
                 elif event.type == pygame.WINDOWEXPOSED:
                     redraw = True
-                elif config.system.allow_keyboard:
-                    action = action_for_key(event)
-                    if action is not None:
-                        LOGGER.debug("Tastaturaktion: %s", action.name)
-                        if action is not Action.EXIT or state.development_mode:
-                            song_index = state.navigation.song_index
-                            page_index = state.navigation.page_index
-                            font_size = state.font_size
-                            state.apply_action(action, config.display)
-                            song_changed = (
-                                song_index != state.navigation.song_index
-                            )
-                            if song_changed and state.song is not None:
-                                LOGGER.debug(
-                                    "Songwechsel: %s", state.song.filename
-                                )
-                            if song_changed or font_size != state.font_size:
-                                _update_layout(state, renderer)
-                                redraw = True
-                            if page_index != state.navigation.page_index:
-                                redraw = True
+                elif keyboard is not None:
+                    actions.extend(keyboard.handle_event(event, now_ms))
+            if not state.running:
+                break
+            if keyboard is not None:
+                actions.extend(keyboard.poll(now_ms))
+            for action in actions:
+                changed = _apply_keyboard_action(
+                    action, state, config.display, renderer
+                )
+                redraw = redraw or changed
                 if not state.running:
                     break
 

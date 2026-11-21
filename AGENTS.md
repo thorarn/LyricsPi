@@ -391,40 +391,31 @@ Songtexte können Akkorde enthalten.
 
 ---
 
-## 8. MIDI-Steuerung
+## Eingabegeräte und Fußcontroller
 
-### Controller
+LyricsPi verwendet einen M-VAVE-Fußcontroller mit vier Tasten (A, B, C, D).
 
-M-VAVE MIDI-Fußcontroller mit vier Tasten.
+Der Controller wird im USB-HID-Tastaturmodus betrieben.
 
-Die tatsächlichen MIDI-Nachrichten werden vor der Implementierung mit einem Diagnoseprogramm ermittelt.
-
-Keine festen MIDI-Note- oder Control-Change-Werte annehmen, bevor die Hardware getestet wurde.
+Eine direkte MIDI-Kommunikation ist nicht erforderlich.
 
 ### Tastenbelegung
 
-| Taste | Funktion |
-|---|---|
-| 1 | Vorheriger Song |
-| 2 | Nächster Song |
-| 3 | Vorherige Seite |
-| 4 | Nächste Seite |
+- A → Pfeil hoch → vorherige Seite
+- B → Pfeil runter → nächste Seite
+- C → Pfeil links → vorheriger Song
+- D → Pfeil rechts → nächster Song
 
 ### Tastenkombinationen
 
-| Kombination | Funktion |
-|---|---|
-| 1 + 3 | Schrift verkleinern |
-| 2 + 4 | Schrift vergrößern |
+- A+C → Schrift verkleinern
+- B+D → Schrift vergrößern
 
-### Kombinationsregeln
+Die Verarbeitung erfolgt über die vorhandene Pygame-Tastatursteuerung.
 
-- Kombinierte Tastendrücke müssen getrennt von Einzelaktionen behandelt werden.
-- Eine erkannte Kombination darf nicht zusätzlich die Einzelaktionen auslösen.
-- Die Erkennung muss das tatsächliche MIDI-Verhalten des Controllers berücksichtigen.
-- Das Zeitfenster für Kombinationen soll konfigurierbar sein.
-- Nicht unterstützte MIDI-Nachrichten werden ignoriert oder im Diagnosemodus protokolliert.
-- Die Abschaltkombination wird nach einem Hardwaretest endgültig festgelegt.
+Es dürfen keine zusätzlichen MIDI-Bibliotheken eingeführt werden.
+
+Die normale Tastatur bleibt als Notbedienung verfügbar.
 
 ---
 

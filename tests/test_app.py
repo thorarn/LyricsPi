@@ -8,7 +8,13 @@ import pytest
 from lyricspi import Action
 from lyricspi import app
 from lyricspi.app import AppState, run
-from lyricspi.config import Config, DisplayConfig, SongsConfig, SystemConfig
+from lyricspi.config import (
+    Config,
+    DisplayConfig,
+    InputConfig,
+    SongsConfig,
+    SystemConfig,
+)
 from lyricspi.layout import Page
 from lyricspi.renderer import Renderer
 from lyricspi.song_loader import SongLoadIssue
@@ -70,7 +76,7 @@ def test_song_draws_resizes_logs_navigation_and_exits(
 
     monkeypatch.setattr(pygame.event, "get", get_events)
     with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
-        run(Config())
+        run(Config(input=InputConfig(enable_combinations=False)))
 
     original, larger, second, restored = screens
     assert original.get_size() == (1280, 720)
@@ -223,7 +229,11 @@ def test_page_layout_follows_font_and_window_changes(
 
     def get_events() -> list[pygame.event.Event]:
         keys, size = next(steps)
-        events = [pygame.event.Event(pygame.KEYDOWN, key=key) for key in keys]
+        events = [
+            pygame.event.Event(event_type, key=key)
+            for key in keys
+            for event_type in (pygame.KEYDOWN, pygame.KEYUP)
+        ]
         if size is not None:
             # The dummy driver needs an explicit change to the drawing surface.
             pygame.display.set_mode(size, pygame.RESIZABLE)
@@ -237,7 +247,11 @@ def test_page_layout_follows_font_and_window_changes(
     monkeypatch.setattr(Renderer, "draw", draw)
     monkeypatch.setattr(pygame.event, "get", get_events)
     display = DisplayConfig(window_width=640, window_height=160, font_step=24)
-    run(Config(display=display, songs=SongsConfig(directory=str(tmp_path))))
+    run(Config(
+        display=display,
+        songs=SongsConfig(directory=str(tmp_path)),
+        input=InputConfig(enable_combinations=False),
+    ))
 
     (
         start, second, previous, end, smaller, expanded, tiny, recovered,
@@ -278,3 +292,67 @@ def test_renderer_keeps_all_glyphs_inside_content_area(
             )
     finally:
         pygame.quit()
+
+
+def test_default_hid_combinations_and_delayed_navigation_use_app_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    (tmp_path / "1_Erstes_Lied.txt").write_text("Erstes Lied", encoding="utf-8")
+    (tmp_path / "2_Zweites_Lied.txt").write_text("Zweites Lied", encoding="utf-8")
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    up, down, left, right = pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT
+    press, release = pygame.KEYDOWN, pygame.KEYUP
+    now_ms = 0
+    steps = iter(
+        [
+            (0, [(press, up)]),
+            (80, [(press, left)]),
+            (100, [(release, up), (release, left)]),
+            (260, [(press, right)]),
+            (300, [(press, down)]),
+            (330, [(release, right), (release, down)]),
+            (500, [(press, right), (release, right)]),
+            (649, []),
+            (650, []),
+            (700, [(press, pygame.K_ESCAPE)]),
+        ]
+    )
+    original_draw = Renderer.draw
+    frames: list[tuple[int, Page]] = []
+
+    def capture(
+        renderer: Renderer, size: int, page: Page, notice: str | None
+    ) -> None:
+        original_draw(renderer, size, page, notice)
+        frames.append((size, page))
+
+    def get_events() -> list[pygame.event.Event]:
+        nonlocal now_ms
+        now_ms, events = next(steps)
+        return [
+            pygame.event.Event(event_type, key=key)
+            for event_type, key in events
+        ]
+
+    monkeypatch.setattr(Renderer, "draw", capture)
+    monkeypatch.setattr(pygame.event, "get", get_events)
+    monkeypatch.setattr(app, "monotonic_ns", lambda: now_ms * 1_000_000)
+    with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
+        run(Config(songs=SongsConfig(directory=str(tmp_path))))
+
+    initial, smaller, restored, next_song = frames
+    assert initial == restored
+    assert smaller == (44, initial[1])
+    assert next_song[0] == 48
+    assert next_song[1] != initial[1]
+    assert [
+        record.getMessage() for record in caplog.records
+        if record.getMessage().startswith("Tastaturaktion")
+    ] == [
+        "Tastaturaktion: FONT_SMALLER",
+        "Tastaturaktion: FONT_LARGER",
+        "Tastaturaktion: NEXT_SONG",
+        "Tastaturaktion: EXIT",
+    ]

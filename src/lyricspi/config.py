@@ -59,13 +59,22 @@ class SongsConfig:
 
 
 @dataclass(frozen=True)
+class InputConfig:
+    combo_window_ms: int = 150
+    enable_combinations: bool = True
+
+
+@dataclass(frozen=True)
 class Config:
     display: DisplayConfig = DisplayConfig()
     system: SystemConfig = SystemConfig()
     songs: SongsConfig = SongsConfig()
+    input: InputConfig = InputConfig()
 
 
-Section = TypeVar("Section", DisplayConfig, SystemConfig, SongsConfig)
+Section = TypeVar(
+    "Section", DisplayConfig, SystemConfig, SongsConfig, InputConfig
+)
 
 
 def _load_section(name: str, values: object, defaults: Section) -> Section:
@@ -157,7 +166,7 @@ def load_config(path: Path | None = None) -> Config:
     if not isinstance(data, dict):
         raise ConfigError("Die Konfiguration muss ein JSON-Objekt sein.")
     for section in data:
-        if section not in ("display", "system", "songs"):
+        if section not in ("display", "system", "songs", "input"):
             raise ConfigError(f"Unbekannter Abschnitt {section}.")
 
     display = _load_section(
@@ -165,6 +174,9 @@ def load_config(path: Path | None = None) -> Config:
     )
     system = _load_section("system", data.get("system", {}), SystemConfig())
     songs = _load_section("songs", data.get("songs", {}), SongsConfig())
+    keyboard = _load_section("input", data.get("input", {}), InputConfig())
     _validate_display(display)
     _validate_songs(songs)
-    return Config(display=display, system=system, songs=songs)
+    if keyboard.combo_window_ms < 1:
+        raise ConfigError("input.combo_window_ms muss größer als 0 sein.")
+    return Config(display=display, system=system, songs=songs, input=keyboard)

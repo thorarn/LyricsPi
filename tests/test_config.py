@@ -8,6 +8,7 @@ from lyricspi.config import (
     PROJECT_ROOT,
     Config,
     ConfigError,
+    InputConfig,
     SongsConfig,
     load_config,
 )
@@ -160,3 +161,39 @@ def test_configures_line_spacing(tmp_path: Path, spacing: int) -> None:
         json.dumps({"display": {"line_spacing": spacing}}), encoding="utf-8"
     )
     assert load_config(path).display.line_spacing == spacing
+
+
+def test_existing_config_uses_hid_defaults(tmp_path: Path) -> None:
+    path = tmp_path / "existing.json"
+    path.write_text('{"display": {"font_size": 52}}', encoding="utf-8")
+
+    assert load_config(path).input == InputConfig(150, True)
+
+
+def test_configures_hid_combinations(tmp_path: Path) -> None:
+    path = tmp_path / "input.json"
+    path.write_text(
+        '{"input": {"combo_window_ms": 220, "enable_combinations": false}}',
+        encoding="utf-8",
+    )
+
+    assert load_config(path).input == InputConfig(220, False)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("combo_window_ms", 0),
+        ("combo_window_ms", -5),
+        ("combo_window_ms", True),
+        ("enable_combinations", "false"),
+    ],
+)
+def test_invalid_hid_config_is_rejected(
+    tmp_path: Path, key: str, value: object
+) -> None:
+    path = tmp_path / "input.json"
+    path.write_text(json.dumps({"input": {key: value}}), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=rf"input\.{key}"):
+        load_config(path)

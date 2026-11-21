@@ -4,7 +4,8 @@ LyricsPi ist ein Offline-Songtext-Prompter für Live-Auftritte auf dem
 Raspberry Pi 3. Unter Windows lädt LyricsPi beim Start die Setlist in den
 Arbeitsspeicher und zeigt den ersten Song in einem Pygame-Fenster. Der
 Text ist standardmäßig weiß auf schwarzem Hintergrund und beginnt
-linksbündig am oberen Rand. Die Bedienung erfolgt per Tastatur.
+linksbündig am oberen Rand. Die Bedienung erfolgt per Tastatur oder
+M-VAVE-USB-Fußcontroller im HID-Modus.
 
 ## Einrichtung unter Windows
 
@@ -53,6 +54,34 @@ Akkord- und Textzeilen an unterschiedlichen Stellen umbrechen, können sich
 die Akkorde relativ zum Text verschieben. Ist keine der unterstützten
 Monospace-Schriften installiert, verwendet Pygame seine Standardschrift.
 
+## M-VAVE-Fußcontroller
+
+Verbinde den M-VAVE per USB im Tastaturmodus (HID) und gib dem
+LyricsPi-Fenster den Tastaturfokus. Die Fußtasten senden dieselben
+Pfeiltasten wie eine normale Tastatur.
+
+| Fußtaste | Tastatursignal | Funktion |
+| --- | --- | --- |
+| A | Pfeil hoch | Vorherige Seite |
+| B | Pfeil runter | Nächste Seite |
+| C | Pfeil links | Vorheriger Song |
+| D | Pfeil rechts | Nächster Song |
+| A + C | Pfeil hoch + links | Schrift verkleinern |
+| B + D | Pfeil runter + rechts | Schrift vergrößern |
+
+Drücke die beiden Tasten einer Kombination gleichzeitig oder kurz
+nacheinander. Die Einzelaktionen der erkannten Kombination entfallen.
+Bei aktiven Kombinationen wartet ein einzelner Pfeiltastendruck
+standardmäßig 150 ms, bevor er ausgeführt wird. Plus, Minus und Escape
+reagieren weiterhin sofort.
+
+Pygame liefert Tastaturereignisse ohne Gerätekennung. Die Kombinationen
+gelten daher auch für die normale Tastatur. Fehlt ein Loslassereignis,
+etwa beim Abziehen des Controllers, kann dieselbe Pfeiltaste nach einer
+Ruhezeit wieder verwendet werden. Diese beträgt mindestens eine Sekunde
+und bei längeren Zeitfenstern das Doppelte des Kombinationsfensters.
+Bei Fokusverlust verwirft LyricsPi ausstehende Pfeiltastendrücke.
+
 ## Konfiguration
 
 Ohne lokale Konfigurationsdatei startet der Simulator mit den
@@ -77,6 +106,18 @@ Fehlermeldung im Terminal.
   `system.allow_keyboard` steuert die Tastatur insgesamt.
   `system.show_splash` wird eingelesen und validiert.
 - Änderungen der Schriftgröße per Tastatur gelten bis zum Programmende.
+
+Unter `input` stellst du das Kombinationsfenster in Millisekunden ein.
+Mit `enable_combinations: false` reagieren die Pfeiltasten unmittelbar.
+
+```json
+{
+  "input": {
+    "combo_window_ms": 150,
+    "enable_combinations": true
+  }
+}
+```
 
 ## Songordner und USB-Stick
 
@@ -142,3 +183,4 @@ aktuellen Song, die Seite und die Gesamtseitenzahl.
 
 Die Songtests erzeugen temporäre Dateien und simulieren die USB-Erkennung.
 Die Anzeigetests verwenden den simulierten SDL-Videotreiber.
+Die HID-Tests verwenden simulierte Tastaturereignisse und Zeitpunkte.
