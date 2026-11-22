@@ -176,7 +176,7 @@ def test_song_fixtures_have_distinct_lengths_and_fill_multiple_pages(
 ) -> None:
     for index in range(1, 6):
         lyrics = ("Eine Textzeile",) * (30 + index)
-        lines = ("[Strophe 1]", *lyrics, "[Refrain]", "[Solo]")
+        lines = ("Titel", "", "[Strophe 1]", *lyrics, "[Refrain]", "[Solo]")
         (tmp_path / f"{index}_Demo.txt").write_text("\n".join(lines), encoding="utf-8")
     songs = load_songs(tmp_path).setlist
     assert len(songs) == 5
@@ -188,6 +188,7 @@ def test_song_fixtures_have_distinct_lengths_and_fill_multiple_pages(
             assert marker in song.content.splitlines()
         pages = renderer.layout(song.content, 48)
         assert len(pages) > 1
+        assert pages[0][0] == "[Strophe 1]"
         assert "[Refrain]" in [line for page in pages for line in page]
 
 
@@ -197,7 +198,7 @@ def test_display_number_keeps_filename_padding(
     tmp_path: Path, separator: str, number: str,
 ) -> None:
     path = tmp_path / f"{number}{separator}Mein Song.txt"
-    path.write_text("Text", encoding="utf-8")
+    path.write_text("Mein Song\n\nText", encoding="utf-8")
     song = load_songs(tmp_path).setlist.first
     assert song is not None
     assert song.number == 1
@@ -291,8 +292,8 @@ def test_taller_font_increases_header_and_leaves_lyrics_room(
 def test_plus_and_minus_resize_every_song_text_element(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (tmp_path / "01 - Mein Song.txt").write_text(
-        "[Strophe 1]\nErste Zeile", encoding="utf-8"
+    (tmp_path / "01 - Dateiname.txt").write_text(
+        "Mein Song\nPlatzhalter für Zeile 2\n[Strophe 1]\nErste Zeile", encoding="utf-8"
     )
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     monkeypatch.setattr("lyricspi.app.display_settings_path", lambda: tmp_path / "settings.json")

@@ -30,7 +30,9 @@ def isolated_display_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 @pytest.mark.parametrize(
     ("action", "initial_size", "expected_size"),
     [
-        (Action.FONT_LARGER, 48, 48),
+        (Action.FONT_LARGER, 48, 52),
+        (Action.FONT_LARGER, 64, 64),
+        (Action.FONT_SMALLER, 28, 28),
         (Action.FONT_SMALLER, 48, 44),
         (Action.FONT_SMALLER, 25, 25),
         (Action.FONT_LARGER, 95, 95),
@@ -59,11 +61,11 @@ def test_exit_stops_application_state() -> None:
 
 
 @pytest.mark.parametrize(("action", "attribute", "values"), [
-    (Action.CYCLE_FONT_SIZE, "font_size", [32, 36, 40, 44, 48, 32, 36]),
+    (Action.CYCLE_FONT_SIZE, "font_size", [28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 28]),
     (Action.ROTATE_DISPLAY, "rotation", [0, 90, 180, 270, 0, 90]),
 ])
 def test_display_values_cycle_in_main_menu(action, attribute, values) -> None:
-    state = AppState(32, development_mode=True)
+    state = AppState(28, development_mode=True)
     state.apply_action(action)
     assert getattr(state, attribute) == values[0]
     state.apply_action(Action.OPEN_MENU)
@@ -76,14 +78,14 @@ def test_menu_saves_display_settings_immediately_and_restores_them_after_restart
     tmp_path: Path, isolated_display_settings: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    (tmp_path / "1_Test.txt").write_text("Erste Zeile\nZweite Zeile", encoding="utf-8")
+    (tmp_path / "1_Test.txt").write_text("Titel\n\nErste Zeile\nZweite Zeile", encoding="utf-8")
     a, b, c, d = pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT
     down, up = pygame.KEYDOWN, pygame.KEYUP
     batches = iter([
         (0, [(down, a)]),
         (5000, []),
         (5100, [(up, a), (down, a), (up, a)]),
-        (5200, [(down, a), (up, a)]),
+        (5200, [(down, a), (up, a)] * 8),
         (5300, [(down, b), (up, b)]),
         (5400, [(down, c), (up, c)]),
         (5500, [(down, d), (up, d)]),
@@ -101,7 +103,7 @@ def test_menu_saves_display_settings_immediately_and_restores_them_after_restart
         now_ms, keys = next(batches)
         if keys is None:
             assert json.loads(isolated_display_settings.read_text()) == {
-                "font_size": 40, "rotation": 90,
+                "font_size": 64, "rotation": 90,
             }
             return [pygame.event.Event(pygame.QUIT)]
         for event, key in keys:
@@ -125,23 +127,23 @@ def test_menu_saves_display_settings_immediately_and_restores_them_after_restart
     run(config)
 
     assert frames == [
-        (View.SONG_VIEW, 32, (640, 360)),
+        (View.SONG_VIEW, 28, (640, 360)),
+        (View.MAIN_MENU, 28, (640, 360)),
         (View.MAIN_MENU, 32, (640, 360)),
-        (View.MAIN_MENU, 36, (640, 360)),
-        (View.MAIN_MENU, 40, (640, 360)),
-        (View.MAIN_MENU, 40, (360, 640)),
-        (View.SONG_LIST, 40, (360, 640)),
-        (View.MAIN_MENU, 40, (360, 640)),
-        (View.SONG_VIEW, 40, (360, 640)),
-        (View.SONG_VIEW, 40, (360, 640)),
+        (View.MAIN_MENU, 64, (640, 360)),
+        (View.MAIN_MENU, 64, (360, 640)),
+        (View.SONG_LIST, 64, (360, 640)),
+        (View.MAIN_MENU, 64, (360, 640)),
+        (View.SONG_VIEW, 64, (360, 640)),
+        (View.SONG_VIEW, 64, (360, 640)),
     ]
 
 
 def test_song_draws_resizes_logs_navigation_and_exits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    (tmp_path / "01_Erster.txt").write_text("Erster Songtext", encoding="utf-8")
-    (tmp_path / "02_Zweiter.txt").write_text("Zweiter Songtext", encoding="utf-8")
+    (tmp_path / "01_Erster.txt").write_text("Erster\n\nErster Songtext", encoding="utf-8")
+    (tmp_path / "02_Zweiter.txt").write_text("Zweiter\n\nZweiter Songtext", encoding="utf-8")
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     monkeypatch.setattr(app, "platform", "win32")
     batches = iter(
@@ -263,7 +265,7 @@ def test_app_loads_setlist_once_and_draws_startup_notice(
     if source in ("valid", "empty"):
         directory.mkdir()
     if source == "valid":
-        (directory / "1_Demo.txt").write_text("Lied", encoding="utf-8")
+        (directory / "1_Demo.txt").write_text("Demo\n\nLied", encoding="utf-8")
     config = Config(
         songs=SongsConfig(
             directory=str(directory),
@@ -293,10 +295,10 @@ def test_app_loads_setlist_once_and_draws_startup_notice(
     load.assert_called_once_with(config.songs)
     draw.assert_called_once()
     if issue:
-        assert draw.call_args.args[1:] == (32, (), issue.value)
+        assert draw.call_args.args[1:] == (28, (), issue.value)
         assert draw.call_args.kwargs["song"] is None
     else:
-        assert draw.call_args.args[1:] == (32, ("Lied",), None)
+        assert draw.call_args.args[1:] == (28, ("Lied",), None)
         assert draw.call_args.kwargs["song"].title == "Demo"
         assert draw.call_args.kwargs["page_count"] == 1
     assert not pygame.display.get_init()
@@ -312,10 +314,10 @@ def test_page_layout_follows_font_and_window_changes(
 ) -> None:
     first_lines = tuple(f"Erste Zeile {index}" for index in range(12))
     (tmp_path / "1_Erster_Titel.txt").write_text(
-        "\n".join(first_lines), encoding="utf-8"
+        "Erster Titel\n\n" + "\n".join(first_lines), encoding="utf-8"
     )
     second_song = tmp_path / "2_Zweiter_Titel.txt"
-    second_song.write_text("Zweiter Text", encoding="utf-8")
+    second_song.write_text("Zweiter Titel\n\nZweiter Text", encoding="utf-8")
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     steps = iter(
         [
@@ -422,8 +424,8 @@ def test_short_b_changes_song_and_logs_hid_events(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     path = tmp_path / "1_Lied.txt"
-    path.write_text("Erste Seite\nZweite Seite", encoding="utf-8")
-    (tmp_path / "2_Zweiter.txt").write_text("Zweiter Song", encoding="utf-8")
+    path.write_text("Erster Titel\n\nErste Seite\nZweite Seite", encoding="utf-8")
+    (tmp_path / "2_Zweiter.txt").write_text("Zweiter Titel\n\nZweiter Song", encoding="utf-8")
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     batches = iter([
         [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_DOWN)],
@@ -460,9 +462,9 @@ def test_controller_menu_restores_text_position_and_selects_songs(
 ) -> None:
     lines = tuple(f"Zeile {number}" for number in range(40))
     for filename, content in (
-        ("10_Dritter.txt", "Dritter Song"),
-        ("2_Zweiter.txt", "Zweiter Song"),
-        ("01_Erster.txt", "\n".join(lines)),
+        ("10_Dritter.txt", "Dritter\n\nDritter Song"),
+        ("2_Zweiter.txt", "Zweiter\n\nZweiter Song"),
+        ("01_Erster.txt", "Erster\n\n" + "\n".join(lines)),
     ):
         (tmp_path / filename).write_text(content, encoding="utf-8")
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
@@ -539,7 +541,7 @@ def test_controller_menu_restores_text_position_and_selects_songs(
     assert all(
         frame[0] is View.MAIN_MENU for frame in (main, larger, rotated, back, reopened)
     )
-    assert (main[4], larger[4], rotated[4]) == (32, 36, 36)
+    assert (main[4], larger[4], rotated[4]) == (28, 32, 32)
     assert (main[6], larger[6], rotated[6]) == (0, 0, 90)
     assert song_list[0] is selected[0] is View.SONG_LIST
     assert song_list[5] == selected[5] == 1
@@ -547,7 +549,7 @@ def test_controller_menu_restores_text_position_and_selects_songs(
     assert all(frame[6] == 90 for frame in (song_list, back, resumed, new_song))
     assert resumed[0:2] == (View.SONG_VIEW, "Erster")
     assert second_page[3][0] in resumed[3]
-    assert new_song[0:5] == (View.SONG_VIEW, "Zweiter", 0, ("Zweiter Song",), 36)
+    assert new_song[0:5] == (View.SONG_VIEW, "Zweiter", 0, ("Zweiter Song",), 32)
 
 
 def test_small_menu_stays_on_one_page_and_keeps_direct_controls(
@@ -684,7 +686,7 @@ def test_splash_transitions_to_song_and_processes_input(
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     monkeypatch.setattr(app, "PROJECT_ROOT", tmp_path)
     song = tmp_path / "1_Lied.txt"
-    song.write_text("Erster Songtext", encoding="utf-8")
+    song.write_text("Titel\n\nErster Songtext", encoding="utf-8")
     if has_logo:
         logo_path = tmp_path / "assets" / "logo.png"
         logo_path.parent.mkdir()
@@ -732,7 +734,7 @@ def test_splash_transitions_to_song_and_processes_input(
     else:
         assert b"\xff\xff\xff" in pixel_data
     assert pygame.image.tostring(frames[1], "RGB") == pixel_data
-    assert pages == [(36, ("Erster Songtext",))]
+    assert pages == [(32, ("Erster Songtext",))]
 
 
 def test_missing_display_cleans_up(

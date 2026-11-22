@@ -71,7 +71,7 @@ und läuft in beide Richtungen zwischen erstem und letztem Song um.
 Beim Blättern bleibt die Anzeige an der ersten bzw. letzten Seite stehen.
 
 Songtext, Kopfzeile, Hauptmenü und Songliste verwenden dieselbe Schriftgröße.
-Im Hauptmenü wechselt A zyklisch durch 32, 36, 40, 44 und 48 px. B schaltet
+Im Hauptmenü wechselt A zyklisch in 4-px-Schritten von 28 bis 64 px. B schaltet
 zwischen 0°, 90°, 180° und 270° um. Das Hauptmenü zeigt alle vier Optionen
 auf einer Seite. Bei wenig Platz werden die Beschriftungen gekürzt. Falls
 vier Zeilen mit der eingestellten Schriftgröße nicht passen, erscheint
@@ -123,8 +123,8 @@ Fehlermeldung im Terminal.
   `system.allow_keyboard` steuert die Tastatur insgesamt.
   `system.show_splash` wird eingelesen und validiert.
 - Änderungen der Schriftgröße und Rotation werden sofort in `settings.json`
-  gespeichert. Der Standard ist 32 px bei 0°. Beim ersten Start nach einem
-  Update werden gültige Werte aus `display.font_size` und `display.rotation`
+  gespeichert. Ohne lokale Vorgabe ist der Standard 28 px bei 0°. Beim
+  ersten Start nach einem Update werden gültige Werte aus `display.font_size` und `display.rotation`
   übernommen, sofern sie in der lokalen Konfiguration vorliegen. Danach
   haben die gespeicherten Einstellungen Vorrang. Eine übernommene Größe
   außerhalb des neuen Zyklus bleibt bis zur nächsten Größenänderung gültig.
@@ -150,8 +150,10 @@ durch die folgenden Werte.
 LyricsPi liest beim Start die TXT-Dateien im obersten Verzeichnis der
 Songquelle. Die Dateiendung kann beispielsweise `.txt` oder `.TXT` lauten.
 Speichere die Dateien in UTF-8. Eine UTF-8-BOM am Dateianfang wird toleriert.
-Zeilenumbrüche, Leerzeilen, Einrückungen und nachgestellte Leerzeichen
-bleiben erhalten.
+In Zeile 1 steht der Titel für die Kopfzeile. Zeile 2 ist die Trennzeile.
+Der angezeigte Songtext beginnt in Zeile 3. Ab dort bleiben Zeilenumbrüche,
+Leerzeilen, Einrückungen und nachgestellte Leerzeichen beim Laden erhalten.
+Bei einer leeren Titelzeile übernimmt LyricsPi den Titel aus dem Dateinamen.
 
 Verwende `Nummer_Songname.txt` oder `Nummer - Songname.txt`, etwa
 `02_Abend.txt` oder `002 - Abend.txt`.
@@ -159,8 +161,8 @@ Verwende `Nummer_Songname.txt` oder `Nummer - Songname.txt`, etwa
 nicht. Bei gleicher Nummer gilt die Reihenfolge der vollständigen Dateinamen.
 Unterordner und symbolische Links werden übersprungen.
 
-Ohne weitere Einstellungen lädt LyricsPi die fünf frei erfundenen,
-mehrseitigen Songs in `demo_songs`. Abschnittsmarker wie `[Strophe 1]`,
+Ohne weitere Einstellungen lädt LyricsPi die Songs aus `demo_songs`.
+Abschnittsmarker wie `[Strophe 1]`,
 `[Refrain]` und `[Solo]` erscheinen als Teil des Songtexts.
 Für einen anderen Ordner ergänze oder ändere den Abschnitt
 `songs` in `config/config.json`. Relative Songordner und Mount-Pfade

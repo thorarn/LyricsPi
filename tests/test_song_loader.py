@@ -12,17 +12,43 @@ from lyricspi.song_loader import SongLoadIssue, load_setlist, load_songs
 
 
 def test_preserves_utf8_bom_whitespace_and_line_endings(tmp_path: Path) -> None:
-    content = "  Grüße\r\n\r\n    Über den See  \nLetzte Zeile\r"
+    content = "    Über den See  \n\r\n[Refrain]\rLetzte Zeile\r"
+    original = ("  Grüße  \r\n\r\n" + content).encode("utf-8-sig")
     path = tmp_path / "002_Am_See.TXT"
-    path.write_bytes(content.encode("utf-8-sig"))
+    path.write_bytes(original)
     unmarked = tmp_path / "3_Lied.txt"
-    unmarked.write_bytes("Für dich".encode("utf-8"))
+    unmarked.write_bytes("Anderer Titel\n\nFür dich".encode("utf-8"))
 
     result = load_songs(tmp_path)
 
     assert result.issue is None
-    assert result.setlist[0] == Song(2, path.name, path, "Am_See", content)
+    assert result.setlist[0] == Song(2, path.name, path, "Grüße", content)
     assert result.setlist[1].content == "Für dich"
+    assert path.read_bytes() == original
+
+
+def test_preserves_additional_blank_lines_and_falls_back_to_filename(tmp_path: Path) -> None:
+    (tmp_path / "1_Mein Titel.txt").write_bytes(
+        b"  \r\r\r[Strophe 1]\rErste Zeile\r\r[Solo]\r\r"
+    )
+
+    song = load_songs(tmp_path).setlist.first
+
+    assert song is not None
+    assert song.title == "Mein Titel"
+    assert song.content == "\r[Strophe 1]\rErste Zeile\r\r[Solo]\r\r"
+
+
+@pytest.mark.parametrize("content", [b"", b"Titel", b"Titel\n\n", b"Titel\r\n\r\n \t\r\n"])
+def test_skips_files_without_displayable_lyrics(tmp_path: Path, content: bytes) -> None:
+    path = tmp_path / "1_Lied.txt"
+    path.write_bytes(content)
+
+    result = load_songs(tmp_path)
+
+    assert result.issue is SongLoadIssue.NO_SONGS
+    assert not result.setlist
+    assert path.read_bytes() == content
 
 
 def test_loads_ten_songs_in_numeric_order(tmp_path: Path) -> None:
@@ -39,7 +65,7 @@ def test_loads_ten_songs_in_numeric_order(tmp_path: Path) -> None:
         "123456789012345678901234567890_Licht.txt",
     ]
     for name in reversed(expected):
-        (tmp_path / name).write_text("Lied", encoding="utf-8")
+        (tmp_path / name).write_text("Titel\n\nLied", encoding="utf-8")
 
     songs = load_songs(tmp_path).setlist
 
@@ -66,15 +92,15 @@ def test_load_skips_invalid_files_and_subdirectories(
         "07_   .txt",
     )
     for name in bad_names:
-        (tmp_path / name).write_text("Inhalt", encoding="utf-8")
+        (tmp_path / name).write_text("Titel\n\nInhalt", encoding="utf-8")
     (tmp_path / "2_Leer.txt").touch()
     (tmp_path / "3_Nur_Leerraum.txt").write_bytes(b"  \r\n\t")
     (tmp_path / "4_Ungueltig.txt").write_bytes(b"\xff")
     (tmp_path / "5_Cover.jpg").write_bytes(b"image")
     subdirectory = tmp_path / "6_Ordner.txt"
     subdirectory.mkdir()
-    (subdirectory / "1_Verschachtelt.txt").write_text("Lied", encoding="utf-8")
-    (tmp_path / "8_Gueltig.txt").write_text("Lied", encoding="utf-8")
+    (subdirectory / "1_Verschachtelt.txt").write_text("Titel\n\nLied", encoding="utf-8")
+    (tmp_path / "8_Gueltig.txt").write_text("Titel\n\nLied", encoding="utf-8")
 
     result = load_songs(tmp_path)
 
@@ -84,7 +110,7 @@ def test_load_skips_invalid_files_and_subdirectories(
         record.getMessage() for record in caplog.records
     }
     assert "ungültiges UTF-8" in caplog.text
-    assert caplog.text.count("Leere Songdatei") == 2
+    assert caplog.text.count("Songdatei ohne darstellbaren Songtext") == 2
 
 
 def test_read_error_on_one_file_preserves_other_songs(
@@ -92,7 +118,7 @@ def test_read_error_on_one_file_preserves_other_songs(
 ) -> None:
     inaccessible = tmp_path / "1_Fehler.txt"
     inaccessible.touch()
-    (tmp_path / "2_Lied.txt").write_text("Lied", encoding="utf-8")
+    (tmp_path / "2_Lied.txt").write_text("Titel\n\nLied", encoding="utf-8")
     open_file = Path.open
 
     def denied_for_first_file(path: Path, *args, **kwargs):
@@ -148,7 +174,7 @@ def test_reports_no_valid_songs(
 def test_local_directory_and_usb_use_the_same_loader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "1_Lied.txt").write_text("Das Lied", encoding="utf-8")
+    (tmp_path / "1_Lied.txt").write_text("Titel\n\nDas Lied", encoding="utf-8")
     monkeypatch.setattr(song_loader, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setattr(song_loader, "_windows_removable_roots", lambda: [tmp_path])
     directory = load_setlist(SongsConfig(directory=str(tmp_path)))
@@ -212,7 +238,7 @@ def test_linux_uses_only_mounted_configured_path(
 ) -> None:
     monkeypatch.setattr(song_loader, "sys", SimpleNamespace(platform="linux"))
     monkeypatch.setattr(Path, "is_mount", lambda path: path == tmp_path and mounted)
-    (tmp_path / "1_Lied.txt").write_text("Das Lied", encoding="utf-8")
+    (tmp_path / "1_Lied.txt").write_text("Titel\n\nDas Lied", encoding="utf-8")
 
     result = load_setlist(SongsConfig(source_mode="usb", linux_mount_path=str(tmp_path)))
 
@@ -245,14 +271,14 @@ def test_accepts_number_widths_and_separators(
     tmp_path: Path, separator: str, prefix: str
 ) -> None:
     name = f"{prefix}{separator}Über den See.TXT"
-    content = "  Grüße\r\n\r\nDie zweite Zeile  "
-    (tmp_path / name).write_bytes(content.encode("utf-8"))
+    content = "Die erste Textzeile  "
+    (tmp_path / name).write_bytes(("  Grüße\r\n\r\n" + content).encode("utf-8"))
 
     song = load_songs(tmp_path).setlist.first
 
     assert song is not None
     assert (song.number, song.title, song.filename, song.content) == (
-        1, "Über den See", name, content,
+        1, "Grüße", name, content,
     )
 
 
@@ -261,7 +287,7 @@ def test_sorts_mixed_filename_formats_numerically(
 ) -> None:
     names = ["10 - Zehn.txt", "2_Zwei.txt", "002 - Auch zwei.txt", "001_Eins.txt"]
     for name in (*names, "4-Lied.txt", "5 -   .txt"):
-        (tmp_path / name).write_text("Text", encoding="utf-8")
+        (tmp_path / name).write_text("Titel\n\nText", encoding="utf-8")
 
     songs = load_songs(tmp_path).setlist
 

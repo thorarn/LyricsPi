@@ -13,7 +13,7 @@ from typing import TypeVar
 
 DEFAULT_CONFIG_PATH = Path("config") / "config.json"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-FONT_SIZES = (32, 36, 40, 44, 48)
+FONT_SIZES = (28, 32, 36, 40, 44, 48, 52, 56, 60, 64)
 ROTATIONS = (0, 90, 180, 270)
 LOGGER = logging.getLogger(__name__)
 

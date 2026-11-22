@@ -28,24 +28,24 @@ def test_missing_local_file_uses_defaults(
     config = load_config()
 
     assert config.display.window_width == 1280
-    assert config.display.font_size == 32
+    assert config.display.font_size == 28
     assert not config.display.fullscreen
     assert config.system.development_mode
     assert not DEFAULT_CONFIG_PATH.exists()
 
 
-def test_missing_display_settings_use_32_px_and_zero_degrees(tmp_path: Path) -> None:
+def test_missing_display_settings_use_28_px_and_zero_degrees(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
-    assert load_display_settings(path, DisplayConfig()) == DisplaySettings(32, 0)
+    assert load_display_settings(path, DisplayConfig()) == DisplaySettings(28, 0)
     assert not path.exists()
 
 
 @pytest.mark.parametrize(("raw", "expected"), [
-    ('{"font_size": 33, "rotation": 45}', DisplaySettings(32, 0)),
-    ('{"font_size": true, "rotation": 90}', DisplaySettings(32, 90)),
+    ('{"font_size": 33, "rotation": 45}', DisplaySettings(28, 0)),
+    ('{"font_size": true, "rotation": 90}', DisplaySettings(28, 90)),
     ('{"font_size": 40, "rotation": "90"}', DisplaySettings(40, 0)),
     ('{"font_size": 36, "rotation": 180.0}', DisplaySettings(36, 0)),
-    ('{"rotation": 270}', DisplaySettings(32, 270)),
+    ('{"rotation": 270}', DisplaySettings(28, 270)),
     ('{"font_size": 33, "legacy_font_size": 52, "rotation": 0}', DisplaySettings()),
     ('{"font_size":', DisplaySettings()),
     ('[]', DisplaySettings()),
@@ -61,15 +61,15 @@ def test_migration_adopts_existing_display_values_and_update_keeps_saved_setting
 ) -> None:
     path = tmp_path / "state" / "settings.json"
     config_path = tmp_path / "config.json"
-    config_path.write_text('{"display": {"font_size": 52, "rotation": 270}}')
+    config_path.write_text('{"display": {"font_size": 50, "rotation": 270}}')
     legacy = load_config(config_path).display
 
-    assert load_display_settings(path, legacy) == DisplaySettings(52, 270)
+    assert load_display_settings(path, legacy) == DisplaySettings(50, 270)
     assert json.loads(path.read_text(encoding="utf-8")) == {
-        "font_size": 52, "rotation": 270, "legacy_font_size": 52,
+        "font_size": 50, "rotation": 270, "legacy_font_size": 50,
     }
-    assert load_display_settings(path, legacy) == DisplaySettings(52, 270)
-    assert load_display_settings(path, DisplayConfig()) == DisplaySettings(52, 270)
+    assert load_display_settings(path, legacy) == DisplaySettings(50, 270)
+    assert load_display_settings(path, DisplayConfig()) == DisplaySettings(50, 270)
 
     save_display_settings(path, DisplaySettings(36, 90))
     saved = path.read_bytes()
@@ -138,9 +138,11 @@ def test_existing_local_file_overrides_defaults(
     assert not config.system.allow_keyboard
 
 
-def test_example_file_matches_defaults() -> None:
+def test_example_file_matches_defaults_except_for_sample_font_size() -> None:
     root = Path(__file__).resolve().parents[1]
-    assert load_config(root / "config" / "config.example.json") == Config()
+    assert load_config(root / "config" / "config.example.json") == Config(
+        display=DisplayConfig(font_size=32),
+    )
 
 
 def test_invalid_json_reports_location(tmp_path: Path) -> None:

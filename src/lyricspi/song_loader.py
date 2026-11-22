@@ -110,7 +110,7 @@ def load_setlist(config: SongsConfig) -> SongLoadResult:
 def load_songs(
     directory: Path, config: SongsConfig = SongsConfig()
 ) -> SongLoadResult:
-    """Read regular TXT files in numeric order and preserve line endings."""
+    """Read song titles and lyrics in numeric order, preserving lyric line endings."""
     try:
         files = list(directory.iterdir())
     except (FileNotFoundError, NotADirectoryError):
@@ -139,9 +139,11 @@ def load_songs(
         candidates.append((int(match[1]), path.name, path, match[2]))
 
     songs = []
-    for number, filename, path, title in sorted(candidates):
+    for number, filename, path, filename_title in sorted(candidates):
         try:
             with path.open(encoding=config.encoding, newline="") as file:
+                title = file.readline().strip() or filename_title
+                file.readline()  # Skip the separator line.
                 content = file.read()
         except UnicodeDecodeError:
             LOGGER.warning("Songdatei %s enthält ungültiges UTF-8.", path)
@@ -150,7 +152,7 @@ def load_songs(
             LOGGER.warning("Songdatei %s nicht lesbar: %s", path, error)
             continue
         if not content.strip():
-            LOGGER.warning("Leere Songdatei übersprungen: %s", path)
+            LOGGER.warning("Songdatei ohne darstellbaren Songtext übersprungen: %s", path)
             continue
         songs.append(Song(number, filename, path, title, content))
 
