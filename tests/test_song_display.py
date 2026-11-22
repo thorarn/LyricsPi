@@ -5,10 +5,11 @@ from unittest.mock import Mock, call, patch
 import pygame
 import pytest
 
-from lyricspi.app import run
+from lyricspi import Action, app
+from lyricspi.app import AppState, run
 from lyricspi.config import Config, DisplayConfig, SongsConfig
 from lyricspi.layout import Page
-from lyricspi.renderer import Renderer, TRACK_COLOR, progress_position
+from lyricspi.renderer import Renderer, TRACK_COLOR, scroll_thumb
 from lyricspi.setlist import Setlist, Song
 from lyricspi.song_loader import load_songs
 
@@ -224,23 +225,83 @@ def test_page_layout_reserves_header_and_progress_gutter(
 
 
 @pytest.mark.parametrize(
-    ("index", "count", "position"),
-    [(0, 3, 0.0), (1, 3, 0.5), (2, 3, 1.0), (0, 1, 0.5)],
+    ("start", "visible", "total", "offset", "height"),
+    [
+        (0, 8, 8, 0, 100),
+        (0, 10, 20, 0, 50), (10, 10, 20, 50, 50),
+        (0, 3, 9, 0, 33), (3, 3, 9, 33, 34), (6, 3, 9, 67, 33),
+        (0, 33, 100, 0, 33), (33, 33, 100, 33, 33), (66, 34, 100, 66, 34),
+        (0, 40, 100, 0, 40), (40, 35, 100, 40, 35), (75, 25, 100, 75, 25),
+        (0, 1, 10000, 0, 2), (5000, 1, 10000, 49, 2), (9999, 1, 10000, 98, 2),
+        (-1, 4, 4, 0, 100), (70, 10, 50, 80, 20),
+        (0, 0, 0, 0, 0),
+    ],
 )
-def test_progress_indicator_matches_page_and_stays_inside_rail(
-    renderer: Renderer, index: int, count: int, position: float
+def test_scroll_thumb_tracks_layout_rows_and_stays_inside_rail(
+    start: int, visible: int, total: int, offset: int, height: int,
 ) -> None:
-    assert progress_position(index, count) == position
-    _, rail, _ = renderer._song_areas(renderer._font_for_size(48))
+    track = pygame.Rect(5, 17, 4, 100)
+    thumb = scroll_thumb(track, start, visible, total)
+    assert thumb == pygame.Rect(5, 17 + offset, 4, height)
+    assert track.top <= thumb.top <= thumb.bottom <= track.bottom
+
+
+def test_scroll_thumb_fits_a_single_pixel_track() -> None:
+    track = pygame.Rect(0, 17, 2, 1)
+    assert scroll_thumb(track, 99, 1, 100) == track
+
+
+def test_scrollbar_draws_white_thumb_and_gray_track(renderer: Renderer) -> None:
     path = Path("01 - Mein Song.txt")
     song = Song(1, path.name, path, "Mein Song", "Text")
-    renderer.draw(48, ("Text",), song=song, page_index=index, page_count=count)
-    marker_height = min(rail.height, max(12, rail.height // 12))
-    top = rail.top + round((rail.height - marker_height) * position)
-    assert renderer.screen.get_at((rail.centerx, top)) == renderer.foreground
-    assert renderer.screen.get_at((rail.centerx, top + marker_height - 1)) == renderer.foreground
-    outside_marker = top - 1 if top > rail.top else top + marker_height
-    assert renderer.screen.get_at((rail.centerx, outside_marker)) == TRACK_COLOR
+    _, rail, _ = renderer._song_areas(renderer._font_for_size(48), song)
+    renderer.draw(48, ("Text", "Zweite Zeile"), song=song, start_line=3, total_lines=10)
+    top = rail.top + round(rail.height * 3 / 10)
+    bottom = rail.top + round(rail.height * 5 / 10)
+    assert [renderer.screen.get_at((rail.centerx, y)) for y in range(rail.top, rail.bottom)] == [
+        pygame.Color("white") if top <= y < bottom else TRACK_COLOR
+        for y in range(rail.top, rail.bottom)
+    ]
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_scrollbar_uses_reflowed_rows_and_rotates_with_song(
+    renderer: Renderer, rotation: int,
+) -> None:
+    content = "\n\n".join(["W" * 200] * 6)
+    song = Song(1, "01_Demo.txt", Path(), "Mein Song", content)
+    state = AppState(28, True, setlist=Setlist((song,)))
+    renderer.rotation = rotation
+    line_counts = []
+
+    for font_size in (28, 64):
+        state.font_size = font_size
+        app._update_layout(state, renderer)
+        state.apply_action(Action.NEXT_PAGE)
+        app._draw(state, renderer, None)
+
+        total = sum(map(len, state.pages))
+        start = sum(len(page) for page in state.pages[:state.navigation.page_index])
+        assert start > 0
+        assert total > len(content.splitlines())
+        line_counts.append(total)
+        _, rail, _ = renderer._song_areas(renderer._font_for_size(font_size), song)
+        width, height = renderer.screen.get_size()
+        x = rail.centerx
+        display = pygame.display.get_surface()
+        top = rail.top + round(rail.height * start / total)
+        bottom = rail.top + round(rail.height * (start + len(state.page)) / total)
+        for y in range(rail.top, rail.bottom):
+            pixel = {
+                0: (x, y),
+                90: (height - 1 - y, x),
+                180: (width - 1 - x, height - 1 - y),
+                270: (y, width - 1 - x),
+            }[rotation]
+            expected = pygame.Color("white") if top <= y < bottom else TRACK_COLOR
+            assert display.get_at(pixel) == expected
+
+    assert line_counts[1] > line_counts[0]
 
 
 def test_header_renders_title_and_number_and_stays_fixed_between_pages(
@@ -252,7 +313,7 @@ def test_header_renders_title_and_number_and_stays_fixed_between_pages(
     text_font = Mock(wraps=renderer._font_for_size(48))
     font_for_size = Mock(return_value=text_font)
     monkeypatch.setattr(renderer, "_font_for_size", font_for_size)
-    renderer.draw(48, ("Erste Zeile",), song=song, page_index=0, page_count=2)
+    renderer.draw(48, ("Erste Zeile",), song=song, start_line=0, total_lines=2)
     first_header = pygame.image.tostring(renderer.screen.subsurface(header), "RGB")
     first_lyrics = pygame.image.tostring(renderer.screen.subsurface(lyrics), "RGB")
     font_for_size.assert_called_once_with(48)
@@ -261,7 +322,7 @@ def test_header_renders_title_and_number_and_stays_fixed_between_pages(
         for text in ("01", "Mein Song", "Erste Zeile")
     ]
 
-    renderer.draw(48, ("Andere Zeile",), song=song, page_index=1, page_count=2)
+    renderer.draw(48, ("Andere Zeile",), song=song, start_line=1, total_lines=2)
     assert pygame.image.tostring(renderer.screen.subsurface(header), "RGB") == first_header
     assert pygame.image.tostring(renderer.screen.subsurface(lyrics), "RGB") != first_lyrics
 

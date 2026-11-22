@@ -15,12 +15,29 @@ from .setlist import Setlist, Song
 LOGGER = logging.getLogger(__name__)
 FONT_NAMES = ("Consolas", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 TRACK_COLOR = pygame.Color("#555555")
+MIN_THUMB_HEIGHT = 2
 
 
-def progress_position(page_index: int, page_count: int) -> float:
-    if page_count <= 1:
-        return 0.5
-    return max(0.0, min(1.0, page_index / (page_count - 1)))
+def scroll_thumb(
+    track: pygame.Rect, start_line: int, visible_lines: int, total_lines: int,
+) -> pygame.Rect:
+    """Map the visible range of layout rows onto the track."""
+    if min(track.height, visible_lines, total_lines) <= 0:
+        return pygame.Rect(track.left, track.top, track.width, 0)
+
+    visible_lines = min(visible_lines, total_lines)
+    hidden_lines = total_lines - visible_lines
+    start_line = max(0, min(start_line, hidden_lines))
+    minimum = min(MIN_THUMB_HEIGHT, track.height)
+    if track.height * visible_lines < minimum * total_lines:
+        # Scale the start over the travel left by the enlarged thumb.
+        height = minimum
+        offset = round((track.height - height) * start_line / hidden_lines)
+    else:
+        offset = round(track.height * start_line / total_lines)
+        end = round(track.height * (start_line + visible_lines) / total_lines)
+        height = end - offset
+    return pygame.Rect(track.left, track.top + offset, track.width, height)
 
 
 class Renderer:
@@ -303,8 +320,8 @@ class Renderer:
         notice: str | None = None,
         *,
         song: Song | None = None,
-        page_index: int = 0,
-        page_count: int = 1,
+        start_line: int = 0,
+        total_lines: int | None = None,
     ) -> None:
         self.screen.fill(self.background)
         area = self._content_area()
@@ -313,7 +330,10 @@ class Renderer:
             header, rail, lyrics = self._song_areas(font, song)
             if song is not None:
                 self._draw_header(song, font, header)
-                self._draw_progress(rail, page_index, page_count)
+                self._draw_scrollbar(
+                    rail, start_line, len(page),
+                    len(page) if total_lines is None else total_lines,
+                )
             self._draw_lines(page, font, lyrics)
         elif area.width > 0 and area.height > 0:
             font = self._font_for_size(font_size)
@@ -349,17 +369,12 @@ class Renderer:
             text = text[:-1]
         return text.rstrip() + ellipsis
 
-    def _draw_progress(
-        self, track: pygame.Rect, page_index: int, page_count: int
+    def _draw_scrollbar(
+        self, track: pygame.Rect, start_line: int, visible_lines: int, total_lines: int,
     ) -> None:
         pygame.draw.rect(self.screen, TRACK_COLOR, track)
-        marker_height = min(track.height, max(12, track.height // 12))
-        position = progress_position(page_index, page_count)
-        offset = round((track.height - marker_height) * position)
-        marker = pygame.Rect(
-            track.left, track.top + offset, track.width, marker_height
-        )
-        pygame.draw.rect(self.screen, self.foreground, marker)
+        thumb = scroll_thumb(track, start_line, visible_lines, total_lines)
+        pygame.draw.rect(self.screen, "white", thumb)
 
     def _draw_lines(
         self, page: Page, font: pygame.font.Font, area: pygame.Rect, *,

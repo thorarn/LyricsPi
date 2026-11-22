@@ -300,7 +300,8 @@ def test_app_loads_setlist_once_and_draws_startup_notice(
     else:
         assert draw.call_args.args[1:] == (28, ("Lied",), None)
         assert draw.call_args.kwargs["song"].title == "Demo"
-        assert draw.call_args.kwargs["page_count"] == 1
+        assert draw.call_args.kwargs["start_line"] == 0
+        assert draw.call_args.kwargs["total_lines"] == 1
     assert not pygame.display.get_init()
     if issue:
         assert "0 Songs geladen." in caplog.text
@@ -335,7 +336,7 @@ def test_page_layout_follows_font_and_window_changes(
         ]
     )
     frames: list[tuple[int, Page, str | None]] = []
-    positions: list[tuple[int, int]] = []
+    line_ranges: list[tuple[int, int]] = []
     original_draw = Renderer.draw
 
     def draw(
@@ -344,7 +345,7 @@ def test_page_layout_follows_font_and_window_changes(
     ) -> None:
         original_draw(renderer, size, page, notice, **song_view)
         frames.append((size, page, notice))
-        positions.append((song_view["page_index"], song_view["page_count"]))
+        line_ranges.append((song_view["start_line"], song_view["total_lines"]))
 
     def get_events() -> list[pygame.event.Event]:
         keys, size = next(steps)
@@ -385,10 +386,13 @@ def test_page_layout_follows_font_and_window_changes(
     assert expanded == recovered == wrapped == (32, first_lines, None)
     assert tiny == (32, (), app.SMALL_WINDOW_NOTICE)
     assert next_song == back == (32, ("Zweiter Text",), None)
-    assert positions[0][0] == 0
-    assert positions[1][0] == 1
-    assert positions[3][0] == positions[3][1] - 1
-    assert positions[-1] == (0, 1)
+    assert line_ranges[:4] == [
+        (0, 12), (len(start[1]), 12), (0, 12), (12 - len(end[1]), 12),
+    ]
+    assert line_ranges[4:] == [
+        (12 - len(smaller[1]), 12), (0, 12), (0, 0), (0, 12),
+        (0, 1), (0, 12), (0, 1),
+    ]
 
 
 def test_renderer_keeps_all_glyphs_inside_content_area(

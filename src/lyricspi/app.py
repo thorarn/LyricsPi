@@ -3,6 +3,7 @@
 import logging
 from bisect import bisect_right
 from dataclasses import dataclass, field
+from itertools import accumulate
 from pathlib import Path
 from sys import platform
 from time import monotonic_ns
@@ -39,6 +40,7 @@ class AppState:
     navigation: Navigation = field(default_factory=Navigation)
     pages: tuple[Page, ...] = ()
     page_starts: list[TextPosition] = field(default_factory=list)
+    page_line_offsets: tuple[int, ...] = (0,)
     text_position: TextPosition = (0, 0)
     view: View = View.SONG_VIEW
     selected_song: int = 0
@@ -129,6 +131,7 @@ def _update_layout(state: AppState, renderer: Renderer) -> None:
         )
     except LayoutTooSmall:
         state.pages = ()
+    state.page_line_offsets = tuple(accumulate(map(len, state.pages), initial=0))
     state.navigation.page_index = bisect_right(
         state.page_starts, state.text_position
     ) - 1
@@ -166,8 +169,8 @@ def _draw(
         state.page,
         notice,
         song=state.song,
-        page_index=state.navigation.page_index,
-        page_count=len(state.pages),
+        start_line=state.page_line_offsets[state.navigation.page_index],
+        total_lines=state.page_line_offsets[-1],
     )
     return 1
 

@@ -33,9 +33,10 @@ aus dem Dateinamen samt führender Nullen. Titel, Nummer, Songtext und
 Abschnittsmarker verwenden dieselbe Schriftgröße. Plus und Minus ändern
 sie in der Songansicht und Songliste um eine Stufe.
 Lange Titel werden mit Auslassungspunkten gekürzt. Die Songtexte
-beginnen darunter. Der Balken links zeigt die Position innerhalb des
-Songs. Seine Markierung steht auf der ersten Seite oben und auf der
-letzten Seite unten. Bei einem einseitigen Song steht sie mittig.
+beginnen darunter. Der Scrollbalken links zeigt Position und Größe des
+sichtbaren Ausschnitts. Umgebrochene Zeilen zählen einzeln. Bei einem
+einseitigen Song füllt der weiße Balken die ganze Spur. Auf der letzten
+Seite endet er bündig am unteren Rand.
 
 Lange Zeilen werden entsprechend der Fensterbreite umgebrochen. LyricsPi
 füllt jede Seite mit vollständigen Zeilen. Strophen, Refrains und
