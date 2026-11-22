@@ -3,13 +3,17 @@
 import logging
 from bisect import bisect_right
 from dataclasses import dataclass, field
+from pathlib import Path
 from sys import platform
 from time import monotonic_ns
 
 import pygame
 
 from . import Action, View
-from .config import PROJECT_ROOT, Config, DisplayConfig
+from .config import (
+    FONT_SIZES, PROJECT_ROOT, Config, DisplaySettings, display_settings_path,
+    load_display_settings, save_display_settings,
+)
 from .keyboard_controller import KeyboardController
 from .layout import LayoutTooSmall, Page, TextPosition
 from .navigation import Navigation
@@ -38,6 +42,7 @@ class AppState:
     text_position: TextPosition = (0, 0)
     view: View = View.SONG_VIEW
     selected_song: int = 0
+    rotation: int = 0
 
     @property
     def song(self) -> Song | None:
@@ -49,23 +54,31 @@ class AppState:
     def page(self) -> Page:
         return self.pages[self.navigation.page_index] if self.pages else ()
 
-    def apply_action(self, action: Action, display: DisplayConfig) -> None:
+    def apply_action(self, action: Action) -> None:
         self.last_action = action
         previous_size = self.font_size
         if action in (Action.EXIT, Action.SHUTDOWN):
             self.running = False
-        elif action is Action.FONT_SMALLER:
-            self.font_size = max(
-                display.font_min, self.font_size - display.font_step
+        elif action is Action.FONT_SMALLER and self.view is not View.MAIN_MENU:
+            self.font_size = next(
+                (size for size in reversed(FONT_SIZES) if size < self.font_size),
+                self.font_size,
             )
-        elif action is Action.FONT_LARGER:
-            self.font_size = min(
-                display.font_max, self.font_size + display.font_step
+        elif action is Action.FONT_LARGER and self.view is not View.MAIN_MENU:
+            self.font_size = next(
+                (size for size in FONT_SIZES if size > self.font_size), self.font_size
             )
         elif self.view is View.SONG_VIEW:
             self._apply_song_action(action)
         elif self.view is View.MAIN_MENU:
-            if action is Action.OPEN_SONG_LIST:
+            if action is Action.CYCLE_FONT_SIZE:
+                self.font_size = next(
+                    (size for size in FONT_SIZES if size > self.font_size), FONT_SIZES[0]
+                )
+            elif action is Action.ROTATE_DISPLAY:
+                self.rotation = (self.rotation + 90) % 360
+                LOGGER.info("Bildschirmrotation: %d°", self.rotation)
+            elif action is Action.OPEN_SONG_LIST:
                 self.selected_song = self.navigation.song_index
                 self.view = View.SONG_LIST
             elif action is Action.BACK:
@@ -134,7 +147,8 @@ def _draw(
     *, view_page: int = 0,
 ) -> int:
     if state.view is View.MAIN_MENU:
-        return renderer.draw_main_menu(state.font_size, view_page)
+        renderer.draw_main_menu(state.font_size)
+        return 1
     if state.view is View.SONG_LIST:
         return renderer.draw_song_list(
             state.setlist, state.selected_song, state.font_size, view_page
@@ -159,7 +173,7 @@ def _draw(
 
 
 def _apply_keyboard_action(
-    action: Action, state: AppState, display: DisplayConfig, renderer: Renderer
+    action: Action, state: AppState, renderer: Renderer, settings_path: Path
 ) -> bool:
     shutdown_requested = action is Action.SHUTDOWN
     if shutdown_requested and (
@@ -176,15 +190,22 @@ def _apply_keyboard_action(
     song = state.song
     page_index = state.navigation.page_index
     font_size = state.font_size
+    rotation = state.rotation
     view = state.view
     selection = state.selected_song
-    state.apply_action(action, display)
+    state.apply_action(action)
+
+    settings_changed = (font_size, rotation) != (state.font_size, state.rotation)
+    if rotation != state.rotation:
+        renderer.rotation = state.rotation
+    if settings_changed:
+        save_display_settings(settings_path, DisplaySettings(state.font_size, state.rotation))
 
     current_song = state.song
     song_changed = song is not current_song
     if song_changed and current_song is not None:
         LOGGER.debug("Songwechsel: %s", current_song.filename)
-    if song_changed or font_size != state.font_size:
+    if song_changed or settings_changed:
         _update_layout(state, renderer)
         return True
     return (
@@ -196,10 +217,13 @@ def _apply_keyboard_action(
 
 def run(config: Config) -> None:
     loaded = load_setlist(config.songs)
+    settings_path = display_settings_path()
+    settings = load_display_settings(settings_path, config.display)
     state = AppState(
-        config.display.font_size,
+        settings.font_size,
         config.system.development_mode,
         setlist=loaded.setlist,
+        rotation=settings.rotation,
     )
     LOGGER.info("%d Songs geladen.", len(state.setlist))
     first_song = state.song
@@ -214,13 +238,14 @@ def run(config: Config) -> None:
 
     try:
         renderer = Renderer(config.display, resizable=state.development_mode)
+        renderer.rotation = state.rotation
         pygame.key.set_repeat()
         LOGGER.info(
             "Tastatureingabe (einschließlich USB-HID): %s",
             "aktiv" if keyboard is not None else "deaktiviert",
         )
         clock = pygame.time.Clock()
-        size = renderer.screen.get_size()
+        size = renderer.display_size
         _update_layout(state, renderer)
         splash_until = None
         logo = None
@@ -241,7 +266,7 @@ def run(config: Config) -> None:
         while state.running:
             events = pygame.event.get()
             now_ms = monotonic_ns() / 1_000_000
-            new_size = renderer.screen.get_size()
+            new_size = renderer.display_size
             previous_view = state.view
             previous_selection = state.selected_song
             redraw = new_size != size
@@ -251,7 +276,7 @@ def run(config: Config) -> None:
                 _update_layout(state, renderer)
             for event in events:
                 if event.type == pygame.QUIT:
-                    state.apply_action(Action.EXIT, config.display)
+                    state.apply_action(Action.EXIT)
                     break
                 elif event.type == pygame.WINDOWEXPOSED:
                     redraw = True
@@ -259,7 +284,7 @@ def run(config: Config) -> None:
                     for action in keyboard.handle_event(event, now_ms, state.view):
                         view = state.view
                         redraw |= _apply_keyboard_action(
-                            action, state, config.display, renderer
+                            action, state, renderer, settings_path
                         )
                         if state.view is not view:
                             keyboard.view_changed()
@@ -275,7 +300,7 @@ def run(config: Config) -> None:
                 ):
                     view = state.view
                     redraw |= _apply_keyboard_action(
-                        action, state, config.display, renderer
+                        action, state, renderer, settings_path
                     )
                     if state.view is not view:
                         keyboard.view_changed()

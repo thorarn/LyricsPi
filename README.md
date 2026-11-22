@@ -31,7 +31,7 @@ Anwendung protokolliert Tastaturaktionen im Entwicklungsmodus im Terminal.
 Die feste Kopfzeile zeigt links den Songtitel und rechts die Songnummer
 aus dem Dateinamen samt führender Nullen. Titel, Nummer, Songtext und
 Abschnittsmarker verwenden dieselbe Schriftgröße. Plus und Minus ändern
-sie gemeinsam.
+sie in der Songansicht und Songliste um eine Stufe.
 Lange Titel werden mit Auslassungspunkten gekürzt. Die Songtexte
 beginnen darunter. Der Balken links zeigt die Position innerhalb des
 Songs. Seine Markierung steht auf der ersten Seite oben und auf der
@@ -40,7 +40,7 @@ letzten Seite unten. Bei einem einseitigen Song steht sie mittig.
 Lange Zeilen werden entsprechend der Fensterbreite umgebrochen. LyricsPi
 füllt jede Seite mit vollständigen Zeilen. Strophen, Refrains und
 Abschnittsmarker können über Seitengrenzen hinweg dargestellt werden.
-Nach einer Schrift- oder Fenstergrößenänderung berechnet LyricsPi die
+Nach einer Änderung von Schriftgröße, Rotation oder Fenstergröße berechnet LyricsPi die
 Seiten neu und zeigt die Seite mit der bisherigen Textposition an.
 Ist das Fenster zu klein für Songtext, zeigt es einen Hinweis.
 
@@ -59,8 +59,8 @@ Pfeiltasten wie eine normale Tastatur.
 
 | Fußtaste | Tastatursignal | Songansicht (`SONG_VIEW`) | Hauptmenü (`MAIN_MENU`) | Songliste (`SONG_LIST`) |
 | --- | --- | --- | --- | --- |
-| A | Pfeil hoch | Kurz zum vorherigen Song. Ab 5 Sekunden Hauptmenü öffnen. | Schrift verkleinern | Auswahl nach oben |
-| B | Pfeil runter | Kurz zum nächsten Song. Ab 15 Sekunden herunterfahren oder LyricsPi beenden. | Schrift vergrößern | Auswahl nach unten |
+| A | Pfeil hoch | Kurz zum vorherigen Song. Ab 5 Sekunden Hauptmenü öffnen. | Nächste Schriftgröße | Auswahl nach oben |
+| B | Pfeil runter | Kurz zum nächsten Song. Ab 15 Sekunden herunterfahren oder LyricsPi beenden. | Ausgabe um 90° im Uhrzeigersinn drehen | Auswahl nach unten |
 | C | Pfeil links | Vorherige Seite | Songliste öffnen | Markierten Song auf Seite 1 öffnen |
 | D | Pfeil rechts | Nächste Seite | Zur vorherigen Songansicht zurückkehren | Zurück zum Hauptmenü |
 
@@ -71,12 +71,15 @@ und läuft in beide Richtungen zwischen erstem und letztem Song um.
 Beim Blättern bleibt die Anzeige an der ersten bzw. letzten Seite stehen.
 
 Songtext, Kopfzeile, Hauptmenü und Songliste verwenden dieselbe Schriftgröße.
-Im Hauptmenü ändern A und B die Schrift sofort sichtbar. Die Änderung gilt
-bis zum Programmende, auch bei Bedienung mit Plus oder Minus auf der Tastatur.
+Im Hauptmenü wechselt A zyklisch durch 32, 36, 40, 44 und 48 px. B schaltet
+zwischen 0°, 90°, 180° und 270° um. Das Hauptmenü zeigt alle vier Optionen
+auf einer Seite. Bei wenig Platz werden die Beschriftungen gekürzt. Falls
+vier Zeilen mit der eingestellten Schriftgröße nicht passen, erscheint
+der Hinweis „Fenster zu klein“.
 Die Songliste zeigt Nummer und Titel in numerischer Reihenfolge und markiert
-die Auswahl. Lange Einträge werden umgebrochen. Wenn das Hauptmenü oder ein
-markierter Titel mehrere Bildschirmseiten braucht, wechselt die Anzeige
-automatisch weiter. Die Tasten bleiben dabei direkt bedienbar.
+die Auswahl. Lange Einträge werden umgebrochen. Wenn ein markierter Titel
+mehrere Bildschirmseiten braucht, wechselt die Anzeige automatisch weiter.
+Die Tasten bleiben dabei direkt bedienbar.
 Mit D aus der Songliste und erneut D im Hauptmenü kehrst du zur bisherigen
 Textstelle zurück. Escape beendet LyricsPi im Windows-Entwicklungsmodus.
 
@@ -111,7 +114,7 @@ Mit `--config PFAD` lässt sich eine andere Datei auswählen. Fehlende Felder
 verwenden ihre Standardwerte. Ungültige Dateien führen zu einer
 Fehlermeldung im Terminal.
 
-- `display` bestimmt Fenstergröße, Schrift, Farben (`#RRGGBB`), Rand
+- `display` bestimmt Fenstergröße, Farben (`#RRGGBB`), Rand
   in ganzen Prozent (0–49) und zusätzlichen Zeilenabstand
   (`line_spacing`, standardmäßig 4 Pixel). Mit `fullscreen: true` startet
   die Anwendung im Vollbild bei Desktop-Auflösung.
@@ -119,7 +122,14 @@ Fehlermeldung im Terminal.
   Windows das Beenden per Escape. In diesem Modus lässt sich die Fenstergröße ändern.
   `system.allow_keyboard` steuert die Tastatur insgesamt.
   `system.show_splash` wird eingelesen und validiert.
-- Änderungen der Schriftgröße im Menü oder per Tastatur gelten bis zum Programmende.
+- Änderungen der Schriftgröße und Rotation werden sofort in `settings.json`
+  gespeichert. Der Standard ist 32 px bei 0°. Beim ersten Start nach einem
+  Update werden gültige Werte aus `display.font_size` und `display.rotation`
+  übernommen, sofern sie in der lokalen Konfiguration vorliegen. Danach
+  haben die gespeicherten Einstellungen Vorrang. Eine übernommene Größe
+  außerhalb des neuen Zyklus bleibt bis zur nächsten Größenänderung gültig.
+- Unter Windows liegt die Datei in `%LOCALAPPDATA%\LyricsPi`. Der
+  Raspberry-Pi-Dienst legt sie unter `/var/lib/lyricspi` ab.
 
 Unter `input` steht `shutdown_key` auf `"down"` für Pfeil runter.
 `shutdown_hold_ms` legt die Haltedauer fest. Der Standard und zugleich

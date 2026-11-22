@@ -153,9 +153,10 @@ Produktiveinstellungen anschließend bei Bedarf manuell.
 3. In der Songansicht mit A und B kurz den vorherigen bzw. nächsten Song
    öffnen. In einem mehrseitigen Song mit C und D zurück- bzw. weiterblättern.
    A mindestens 5 Sekunden halten und das Hauptmenü prüfen. Beim Loslassen
-   muss der Song erhalten bleiben. Im Hauptmenü ändern A und B die
-   Schriftgröße, C öffnet die Songliste und D kehrt zur bisherigen Textstelle
-   zurück. In der Songliste bewegen A und B die Markierung, C öffnet den
+   muss der Song erhalten bleiben. Im Hauptmenü schaltet A zur nächsten
+   Schriftgröße und B dreht die gesamte Ausgabe um 90° im Uhrzeigersinn.
+   C öffnet die Songliste und D kehrt zur bisherigen Textstelle zurück.
+   In der Songliste bewegen A und B die Markierung, C öffnet den
    markierten Song auf Seite 1 und D führt zurück zum Hauptmenü.
    Den Controller im Betrieb ab- und wieder anstecken.
    [Vollständige Tastenbelegung](../README.md#bedienung-mit-fußcontroller-und-tastatur)
@@ -349,7 +350,10 @@ die DRM-Connector-Diagnose oben verwenden.
 Ein Update außerhalb eines Auftritts aus dem separaten Checkout starten.
 Der Installer sichert eine von LyricsPi erzeugte frühere UUID-Mount-Unit
 und ersetzt sie durch den USB-Hilfsdienst. Nach dem automatischen Neustart
-HDMI, Eingabe und USB erneut prüfen.
+HDMI, Eingabe und USB erneut prüfen. systemd stellt dem Dienst
+`/var/lib/lyricspi` als beschreibbares Zustandsverzeichnis bereit. Die dort
+gespeicherte `settings.json` für Schriftgröße und Rotation bleibt beim
+Austausch der Programmdateien erhalten.
 
 ```bash
 cd "$HOME/LyricsPi"
@@ -387,7 +391,7 @@ Nach vollständig geprüfter Installation kann in `sudo raspi-config` unter
 **Performance Options → Overlay File System** ein schreibgeschütztes
 Root-Dateisystem mit RAM-Overlay aktiviert werden. Das reduziert
 Schreibzugriffe auf die MicroSD. Schreibzugriffe im Overlay belegen RAM.
-Konfigurationsänderungen, Git-Updates und persistente Journaldaten gehen
+Konfigurationsänderungen, Anzeigeeinstellungen, Git-Updates und persistente Journaldaten gehen
 bei Neustart verloren, solange sie nur im Overlay liegen. Für Updates
 und dauerhafte Änderungen das Overlay zuerst deaktivieren und neu starten,
 die Änderungen durchführen und testen und erst danach wieder aktivieren.

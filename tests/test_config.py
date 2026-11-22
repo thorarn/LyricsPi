@@ -9,9 +9,14 @@ from lyricspi.config import (
     PROJECT_ROOT,
     Config,
     ConfigError,
+    DisplayConfig,
+    DisplaySettings,
     InputConfig,
     SongsConfig,
+    display_settings_path,
     load_config,
+    load_display_settings,
+    save_display_settings,
 )
 
 
@@ -23,10 +28,86 @@ def test_missing_local_file_uses_defaults(
     config = load_config()
 
     assert config.display.window_width == 1280
-    assert config.display.font_size == 48
+    assert config.display.font_size == 32
     assert not config.display.fullscreen
     assert config.system.development_mode
     assert not DEFAULT_CONFIG_PATH.exists()
+
+
+def test_missing_display_settings_use_32_px_and_zero_degrees(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    assert load_display_settings(path, DisplayConfig()) == DisplaySettings(32, 0)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ('{"font_size": 33, "rotation": 45}', DisplaySettings(32, 0)),
+    ('{"font_size": true, "rotation": 90}', DisplaySettings(32, 90)),
+    ('{"font_size": 40, "rotation": "90"}', DisplaySettings(40, 0)),
+    ('{"font_size": 36, "rotation": 180.0}', DisplaySettings(36, 0)),
+    ('{"rotation": 270}', DisplaySettings(32, 270)),
+    ('{"font_size": 33, "legacy_font_size": 52, "rotation": 0}', DisplaySettings()),
+    ('{"font_size":', DisplaySettings()),
+    ('[]', DisplaySettings()),
+])
+def test_invalid_display_settings_fall_back_per_field(tmp_path, raw, expected) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(raw, encoding="utf-8")
+    assert load_display_settings(path, DisplayConfig(font_size=48)) == expected
+
+
+def test_migration_adopts_existing_display_values_and_update_keeps_saved_settings(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state" / "settings.json"
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"display": {"font_size": 52, "rotation": 270}}')
+    legacy = load_config(config_path).display
+
+    assert load_display_settings(path, legacy) == DisplaySettings(52, 270)
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "font_size": 52, "rotation": 270, "legacy_font_size": 52,
+    }
+    assert load_display_settings(path, legacy) == DisplaySettings(52, 270)
+    assert load_display_settings(path, DisplayConfig()) == DisplaySettings(52, 270)
+
+    save_display_settings(path, DisplaySettings(36, 90))
+    saved = path.read_bytes()
+    assert load_display_settings(path, DisplayConfig()) == DisplaySettings(36, 90)
+    assert load_display_settings(path, legacy) == DisplaySettings(36, 90)
+    assert path.read_bytes() == saved
+
+
+def test_failed_atomic_replace_keeps_previous_document(tmp_path, monkeypatch, caplog) -> None:
+    path = tmp_path / "settings.json"
+    save_display_settings(path, DisplaySettings(40, 90))
+
+    def fail_replace(temporary: Path, target: Path) -> None:
+        assert temporary.parent == target.parent
+        assert json.loads(temporary.read_text(encoding="utf-8")) == {
+            "font_size": 44, "rotation": 180,
+        }
+        raise PermissionError("replace failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    save_display_settings(path, DisplaySettings(44, 180))
+    assert load_display_settings(path, DisplayConfig()) == DisplaySettings(40, 90)
+    assert list(tmp_path.iterdir()) == [path]
+    assert "replace failed" in caplog.text
+
+
+@pytest.mark.parametrize(("platform", "variable", "parts"), [
+    ("win32", "LOCALAPPDATA", ("LyricsPi", "settings.json")),
+    ("linux", "STATE_DIRECTORY", ("settings.json",)),
+    ("linux", "XDG_STATE_HOME", ("lyricspi", "settings.json")),
+])
+def test_settings_path_respects_platform_state_directory(
+    tmp_path, monkeypatch, platform, variable, parts,
+) -> None:
+    monkeypatch.setattr(config_module, "platform", platform)
+    monkeypatch.delenv("STATE_DIRECTORY", raising=False)
+    monkeypatch.setenv(variable, str(tmp_path))
+    assert display_settings_path() == tmp_path.joinpath(*parts)
 
 
 def test_existing_local_file_overrides_defaults(

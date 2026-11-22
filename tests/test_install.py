@@ -130,6 +130,15 @@ def test_production_service_sets_kmsdrm_and_egl_libraries() -> None:
     ]
 
 
+def test_service_uses_persistent_state_with_protected_program_files() -> None:
+    unit = (ROOT / "deploy" / "lyricspi.service").read_text(encoding="utf-8")
+    lines = unit.splitlines()
+    assert "User=lyricspi" in lines
+    assert "ProtectSystem=strict" in lines
+    assert "StateDirectory=lyricspi" in lines
+    assert "StateDirectoryMode=0750" in lines
+
+
 def test_application_reuse_is_independent_of_installed_units(
     bash: str, tmp_path: Path
 ) -> None:

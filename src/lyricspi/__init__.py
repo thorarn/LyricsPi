@@ -10,6 +10,8 @@ class Action(Enum):
     NEXT_PAGE = auto()
     FONT_SMALLER = auto()
     FONT_LARGER = auto()
+    CYCLE_FONT_SIZE = auto()
+    ROTATE_DISPLAY = auto()
     OPEN_MENU = auto()
     OPEN_SONG_LIST = auto()
     BACK = auto()

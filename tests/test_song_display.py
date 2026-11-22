@@ -6,7 +6,7 @@ import pygame
 import pytest
 
 from lyricspi.app import run
-from lyricspi.config import Config, DisplayConfig, PROJECT_ROOT, SongsConfig
+from lyricspi.config import Config, DisplayConfig, SongsConfig
 from lyricspi.layout import Page
 from lyricspi.renderer import Renderer, TRACK_COLOR, progress_position
 from lyricspi.setlist import Setlist, Song
@@ -60,11 +60,13 @@ def test_song_list_draws_only_visible_entries(
     assert renderer.screen.get_at((0, 0)) == pygame.Color("black")
 
 
-def test_menu_wraps_and_pages_without_shrinking_at_maximum_font_size(
-    renderer: Renderer, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("width", [400, 1280])
+def test_menu_shows_four_options_without_shrinking_at_maximum_font_size(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch, width: int,
 ) -> None:
-    pygame.display.set_mode((400, 260))
-    size = DisplayConfig().font_max
+    pygame.display.set_mode((width, 260))
+    renderer.rotation = 180
+    size = 48
     font = renderer._font_for_size(size)
     font_for_size = Mock(wraps=renderer._font_for_size)
     monkeypatch.setattr(renderer, "_font_for_size", font_for_size)
@@ -82,14 +84,51 @@ def test_menu_wraps_and_pages_without_shrinking_at_maximum_font_size(
         draw_block(page, used_font, area, selected=selected)
 
     monkeypatch.setattr(renderer, "_draw_menu_block", capture)
-    count = renderer.draw_main_menu(size)
-    assert count > 1
-    for page_index in range(1, count):
-        assert renderer.draw_main_menu(size, page_index) == count
-    assert "".join(" ".join(blocks).split()) == (
-        "ASchriftkleinerBSchriftgrößerCAlleSongsauflistenDZumSongzurück"
-    )
-    assert font_for_size.call_args_list == [call(size)] * count
+    renderer.draw_main_menu(size)
+    assert [line[:1] for line in blocks] == ["A", "B", "C", "D"]
+    assert blocks[0].endswith("48 px")
+    assert blocks[1].endswith("180°")
+    if width == 1280:
+        assert blocks == [
+            "A – Schriftgröße: 48 px", "B – Rotation: 180°",
+            "C – Alle Songs", "D – Zurück zum Song",
+        ]
+    font_for_size.assert_called_once_with(size)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("view", ["song", "menu", "list", "splash"])
+def test_frame_is_rotated_as_a_unit(renderer: Renderer, rotation: int, view: str) -> None:
+    display = pygame.display.set_mode((720, 380))
+    renderer.rotation = rotation
+    song = Song(1, "01_Demo.txt", Path(), "Erster Song", "Text für die Anzeige")
+    if view == "song":
+        renderer.draw(40, renderer.layout(song.content, 40, song=song)[0], song=song)
+    elif view == "menu":
+        renderer.draw_main_menu(40)
+    elif view == "list":
+        renderer.draw_song_list(Setlist((song,)), 0, 40)
+    else:
+        renderer.draw_splash(None)
+
+    logical_size = (380, 720) if rotation in (90, 270) else (720, 380)
+    assert renderer.screen.get_size() == logical_size
+    assert display.get_size() == (720, 380)
+    expected = pygame.transform.rotate(renderer.screen, -rotation)
+    pixels = pygame.image.tostring(display, "RGB")
+    assert pixels == pygame.image.tostring(expected, "RGB")
+    assert any(pixels)
+
+
+def test_clockwise_rotation_and_canvas_resize(renderer: Renderer) -> None:
+    display = pygame.display.set_mode((500, 300))
+    renderer.rotation = 90
+    renderer.screen.fill("black")
+    renderer.screen.set_at((0, 0), pygame.Color("red"))
+    renderer._present()
+    assert display.get_at((499, 0)) == pygame.Color("red")
+    pygame.display.set_mode((800, 450))
+    assert renderer.screen.get_size() == (450, 800)
 
 
 def test_empty_song_list_shows_notice_with_global_font(
@@ -132,10 +171,14 @@ def test_song_list_rewraps_long_title_with_the_global_font(
     assert "".join(" ".join(rows).split()) == "".join(f"01{title}".split())
 
 
-def test_demo_songs_have_distinct_lengths_and_fill_multiple_pages(
-    renderer: Renderer,
+def test_song_fixtures_have_distinct_lengths_and_fill_multiple_pages(
+    renderer: Renderer, tmp_path: Path,
 ) -> None:
-    songs = load_songs(PROJECT_ROOT / "demo_songs").setlist
+    for index in range(1, 6):
+        lyrics = ("Eine Textzeile",) * (30 + index)
+        lines = ("[Strophe 1]", *lyrics, "[Refrain]", "[Solo]")
+        (tmp_path / f"{index}_Demo.txt").write_text("\n".join(lines), encoding="utf-8")
+    songs = load_songs(tmp_path).setlist
     assert len(songs) == 5
     lengths = {len(song.content.splitlines()) for song in songs}
     assert min(lengths) >= 30
@@ -252,6 +295,7 @@ def test_plus_and_minus_resize_every_song_text_element(
         "[Strophe 1]\nErste Zeile", encoding="utf-8"
     )
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setattr("lyricspi.app.display_settings_path", lambda: tmp_path / "settings.json")
     batches = iter([
         [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_PLUS)],
         [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_MINUS)],

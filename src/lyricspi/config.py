@@ -1,14 +1,21 @@
 """Load and validate the local JSON configuration."""
 
 import json
+import logging
+import os
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from sys import platform
+from tempfile import NamedTemporaryFile
 from typing import TypeVar
 
 
 DEFAULT_CONFIG_PATH = Path("config") / "config.json"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FONT_SIZES = (32, 36, 40, 44, 48)
+ROTATIONS = (0, 90, 180, 270)
+LOGGER = logging.getLogger(__name__)
 
 
 class ConfigError(ValueError):
@@ -20,7 +27,7 @@ class DisplayConfig:
     fullscreen: bool = False
     window_width: int = 1280
     window_height: int = 720
-    font_size: int = 48
+    font_size: int = FONT_SIZES[0]
     font_min: int = 24
     font_max: int = 96
     font_step: int = 4
@@ -28,6 +35,80 @@ class DisplayConfig:
     background: str = "#000000"
     margin_percent: int = 5
     line_spacing: int = 4
+    rotation: int = 0
+
+
+@dataclass(frozen=True)
+class DisplaySettings:
+    font_size: int = FONT_SIZES[0]
+    rotation: int = 0
+
+
+def display_settings_path() -> Path:
+    if platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        root = Path(local) if local else Path.home() / "AppData" / "Local"
+        return root / "LyricsPi" / "settings.json"
+    if state := os.environ.get("STATE_DIRECTORY"):
+        return Path(state) / "settings.json"
+    state = os.environ.get("XDG_STATE_HOME")
+    root = Path(state) if state else Path.home() / ".local" / "state"
+    return root / "lyricspi" / "settings.json"
+
+
+def save_display_settings(path: Path, settings: DisplaySettings) -> None:
+    temporary = None
+    data = asdict(settings)
+    if settings.font_size not in FONT_SIZES:
+        data["legacy_font_size"] = settings.font_size
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False,
+        ) as file:
+            temporary = Path(file.name)
+            json.dump(data, file, indent=2)
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        temporary.replace(path)
+    except OSError as error:
+        LOGGER.warning("Anzeigeeinstellungen konnten nicht gespeichert werden: %s", error)
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                LOGGER.debug("Temporäre Einstellungsdatei: %s", cleanup_error)
+
+
+def load_display_settings(path: Path, legacy: DisplayConfig) -> DisplaySettings:
+    defaults = DisplaySettings()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        migrated = DisplaySettings(legacy.font_size, legacy.rotation)
+        if migrated != defaults:
+            save_display_settings(path, migrated)
+        return migrated
+    except (OSError, ValueError) as error:
+        LOGGER.warning("Anzeigeeinstellungen konnten nicht gelesen werden: %s", error)
+        return defaults
+
+    if not isinstance(data, dict):
+        LOGGER.warning("Anzeigeeinstellungen müssen ein JSON-Objekt sein.")
+        return defaults
+    size = data.get("font_size")
+    angle = data.get("rotation")
+    # Old installations allowed sizes outside the new cycle.
+    migrated_size = data.get("legacy_font_size")
+    if type(size) is not int or size < 1 or (
+        size not in (*FONT_SIZES, legacy.font_size)
+        and (type(migrated_size) is not int or size != migrated_size)
+    ):
+        size = defaults.font_size
+    if type(angle) is not int or angle not in ROTATIONS:
+        angle = defaults.rotation
+    return DisplaySettings(size, angle)
 
 
 @dataclass(frozen=True)
@@ -119,6 +200,8 @@ def _validate_display(display: DisplayConfig) -> None:
         raise ConfigError("display.margin_percent muss zwischen 0 und 49 sein.")
     if display.line_spacing < 0:
         raise ConfigError("display.line_spacing darf nicht negativ sein.")
+    if display.rotation not in ROTATIONS:
+        raise ConfigError("display.rotation muss 0, 90, 180 oder 270 sein.")
 
 
 def _validate_songs(songs: SongsConfig) -> None:

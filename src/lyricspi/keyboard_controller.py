@@ -17,8 +17,8 @@ ARROW_ACTIONS = {
         pygame.K_RIGHT: Action.NEXT_PAGE,
     },
     View.MAIN_MENU: {
-        pygame.K_UP: Action.FONT_SMALLER,
-        pygame.K_DOWN: Action.FONT_LARGER,
+        pygame.K_UP: Action.CYCLE_FONT_SIZE,
+        pygame.K_DOWN: Action.ROTATE_DISPLAY,
         pygame.K_LEFT: Action.OPEN_SONG_LIST,
         pygame.K_RIGHT: Action.BACK,
     },
@@ -45,6 +45,10 @@ def action_for_key(
 ) -> Action | None:
     if event.type != pygame.KEYDOWN:
         return None
+    if view is View.MAIN_MENU:
+        return ARROW_ACTIONS[view].get(event.key) or (
+            Action.EXIT if event.key == pygame.K_ESCAPE else None
+        )
 
     # SDL reports the typed character independently from the physical key.
     typed = getattr(event, "unicode", "")

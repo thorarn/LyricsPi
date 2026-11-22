@@ -15,12 +15,6 @@ from .setlist import Setlist, Song
 LOGGER = logging.getLogger(__name__)
 FONT_NAMES = ("Consolas", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 TRACK_COLOR = pygame.Color("#555555")
-MENU_OPTIONS = (
-    "A  Schrift kleiner",
-    "B  Schrift größer",
-    "C  Alle Songs auflisten",
-    "D  Zum Song zurück",
-)
 
 
 def progress_position(page_index: int, page_count: int) -> float:
@@ -49,7 +43,7 @@ class Renderer:
             pygame.RESIZABLE if resizable else 0
         )
         try:
-            self.screen = pygame.display.set_mode(size, flags)
+            display = pygame.display.set_mode(size, flags)
         except pygame.error as error:
             if platform.startswith("linux") and driver.lower() == "kmsdrm":
                 raise RuntimeError(
@@ -61,13 +55,36 @@ class Renderer:
             pygame.display.set_allow_screensaver(False)
             pygame.mouse.set_visible(False)
         pygame.display.set_caption("LyricsPi")
-        LOGGER.info("Fenster initialisiert: %d × %d", *self.screen.get_size())
+        LOGGER.info("Fenster initialisiert: %d × %d", *display.get_size())
 
+        self.rotation = config.rotation
+        self._canvas: pygame.Surface | None = None
         self.foreground = pygame.Color(config.foreground)
         self.background = pygame.Color(config.background)
         self.margin_percent = config.margin_percent
         self.line_spacing = config.line_spacing
         self._fonts = lru_cache(maxsize=8)(pygame.font.SysFont)
+
+    @property
+    def display_size(self) -> tuple[int, int]:
+        return pygame.display.get_surface().get_size()
+
+    @property
+    def screen(self) -> pygame.Surface:
+        display = pygame.display.get_surface()
+        if self.rotation == 0:
+            return display
+        width, height = display.get_size()
+        size = (height, width) if self.rotation in (90, 270) else (width, height)
+        if self._canvas is None or self._canvas.get_size() != size:
+            self._canvas = pygame.Surface(size).convert(display)
+        return self._canvas
+
+    def _present(self) -> None:
+        if self.rotation:
+            frame = pygame.transform.rotate(self.screen, -self.rotation)
+            pygame.display.get_surface().blit(frame, (0, 0))
+        pygame.display.flip()
 
     def load_splash_logo(self, path: Path) -> pygame.Surface | None:
         try:
@@ -90,7 +107,7 @@ class Renderer:
             size = max(1, bounds.width), max(1, bounds.height)
             image = pygame.transform.smoothscale(image, size)
         self.screen.blit(image, image.get_rect(center=area.center))
-        pygame.display.flip()
+        self._present()
 
     def _font_for_size(self, size: int) -> pygame.font.Font:
         return self._fonts(FONT_NAMES, size)
@@ -164,17 +181,24 @@ class Renderer:
             len(page) - 1
         ) * self.line_spacing
 
-    def draw_main_menu(self, font_size: int, page_index: int = 0) -> int:
+    def draw_main_menu(self, font_size: int) -> None:
         self.screen.fill("black")
         area = self._content_area()
         font = self._font_for_size(font_size)
-        options = "\n".join(MENU_OPTIONS)
-        pages = self._fitting_pages(
-            f"Hauptmenü · Schriftgröße {font_size}\n{options}", font, area
+        options = (
+            f"A – Schriftgröße: {font_size} px",
+            f"B – Rotation: {self.rotation}°",
+            "C – Alle Songs",
+            "D – Zurück zum Song",
         )
+        pages = self._fitting_pages("\n".join(options), font, area)
         if len(pages) != 1:
-            pages = self._fitting_pages(options, font, area)
-        return self._draw_menu_pages(pages, page_index, font, area)
+            compact = (f"A – {font_size} px", f"B – {self.rotation}°")
+            if all(font.size(option)[0] <= area.width for option in compact):
+                compact += tuple(self._ellipsize(option, font, area.width) for option in options[2:])
+                if self._page_height(compact, font) <= area.height:
+                    pages = (compact,)
+        self._draw_menu_pages(pages if len(pages) == 1 else (), 0, font, area)
 
     def _draw_menu_pages(
         self, pages: tuple[Page, ...], page_index: int, font: pygame.font.Font,
@@ -186,7 +210,7 @@ class Renderer:
             )
         else:
             self._draw_small_window_notice(font, area, "white")
-        pygame.display.flip()
+        self._present()
         return len(pages)
 
     def _draw_menu_block(
@@ -259,7 +283,7 @@ class Renderer:
         for index, page in enumerate((*reversed(above), current[0], *below)):
             self._draw_menu_block(page, font, area, selected=index == len(above))
             area.top += self._page_height(page, font) + self.line_spacing
-        pygame.display.flip()
+        self._present()
         return 1
 
     def _draw_small_window_notice(
@@ -298,7 +322,7 @@ class Renderer:
                 self._draw_lines(pages[0], font, area)
             else:
                 self._draw_small_window_notice(font, area, self.foreground, notice)
-        pygame.display.flip()
+        self._present()
 
     def _draw_header(
         self, song: Song, font: pygame.font.Font, header: pygame.Rect

@@ -34,6 +34,11 @@ def test_keyup_does_not_map_to_stateless_action() -> None:
     assert action_for_key(release(pygame.K_RIGHT)) is None
 
 
+@pytest.mark.parametrize("key", [pygame.K_PLUS, pygame.K_MINUS, pygame.K_KP_MINUS])
+def test_font_shortcuts_do_not_add_menu_functions(key: int) -> None:
+    assert action_for_key(press(key), View.MAIN_MENU) is None
+
+
 def press(key: int, *, repeat: bool = False) -> pygame.event.Event:
     return pygame.event.Event(pygame.KEYDOWN, key=key, repeat=repeat)
 
@@ -46,7 +51,7 @@ def release(key: int) -> pygame.event.Event:
     ("view", "actions"),
     [
         (View.MAIN_MENU, (
-            Action.FONT_SMALLER, Action.FONT_LARGER,
+            Action.CYCLE_FONT_SIZE, Action.ROTATE_DISPLAY,
             Action.OPEN_SONG_LIST, Action.BACK,
         )),
         (View.SONG_LIST, (
@@ -183,5 +188,5 @@ def test_view_change_consumes_held_arrows_until_release() -> None:
     assert keyboard.handle_event(release(pygame.K_DOWN), 21000, View.MAIN_MENU) == []
     assert keyboard.handle_event(release(pygame.K_UP), 21000, View.MAIN_MENU) == []
     assert keyboard.handle_event(press(pygame.K_UP), 22000, View.MAIN_MENU) == [
-        Action.FONT_SMALLER
+        Action.CYCLE_FONT_SIZE
     ]

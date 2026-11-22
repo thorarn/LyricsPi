@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 from unittest.mock import Mock
@@ -19,13 +20,20 @@ from lyricspi.renderer import Renderer
 from lyricspi.song_loader import SongLoadIssue
 
 
+@pytest.fixture(autouse=True)
+def isolated_display_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    path = tmp_path / "state" / "settings.json"
+    monkeypatch.setattr(app, "display_settings_path", lambda: path)
+    return path
+
+
 @pytest.mark.parametrize(
     ("action", "initial_size", "expected_size"),
     [
-        (Action.FONT_LARGER, 48, 52),
+        (Action.FONT_LARGER, 48, 48),
         (Action.FONT_SMALLER, 48, 44),
-        (Action.FONT_SMALLER, 25, 24),
-        (Action.FONT_LARGER, 95, 96),
+        (Action.FONT_SMALLER, 25, 25),
+        (Action.FONT_LARGER, 95, 95),
         (Action.NEXT_SONG, 48, 48),
     ],
 )
@@ -34,7 +42,7 @@ def test_applies_action_to_state(
 ) -> None:
     state = AppState(initial_size, development_mode=True)
 
-    state.apply_action(action, DisplayConfig())
+    state.apply_action(action)
 
     assert state.font_size == expected_size
     assert state.last_action is action
@@ -44,15 +52,96 @@ def test_applies_action_to_state(
 def test_exit_stops_application_state() -> None:
     state = AppState(48, development_mode=True)
 
-    state.apply_action(Action.EXIT, DisplayConfig())
+    state.apply_action(Action.EXIT)
 
     assert not state.running
     assert state.last_action is Action.EXIT
 
 
-def test_song_draws_resizes_logs_navigation_and_exits(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize(("action", "attribute", "values"), [
+    (Action.CYCLE_FONT_SIZE, "font_size", [32, 36, 40, 44, 48, 32, 36]),
+    (Action.ROTATE_DISPLAY, "rotation", [0, 90, 180, 270, 0, 90]),
+])
+def test_display_values_cycle_in_main_menu(action, attribute, values) -> None:
+    state = AppState(32, development_mode=True)
+    state.apply_action(action)
+    assert getattr(state, attribute) == values[0]
+    state.apply_action(Action.OPEN_MENU)
+    for expected in values[1:]:
+        state.apply_action(action)
+        assert getattr(state, attribute) == expected
+
+
+def test_menu_saves_display_settings_immediately_and_restores_them_after_restart(
+    tmp_path: Path, isolated_display_settings: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    (tmp_path / "1_Test.txt").write_text("Erste Zeile\nZweite Zeile", encoding="utf-8")
+    a, b, c, d = pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT
+    down, up = pygame.KEYDOWN, pygame.KEYUP
+    batches = iter([
+        (0, [(down, a)]),
+        (5000, []),
+        (5100, [(up, a), (down, a), (up, a)]),
+        (5200, [(down, a), (up, a)]),
+        (5300, [(down, b), (up, b)]),
+        (5400, [(down, c), (up, c)]),
+        (5500, [(down, d), (up, d)]),
+        (5600, [(down, d), (up, d)]),
+        (5700, None),
+        (5800, None),
+    ])
+    held = {}
+    now_ms = 0
+    frames = []
+    draw = app._draw
+
+    def events() -> list[pygame.event.Event]:
+        nonlocal now_ms
+        now_ms, keys = next(batches)
+        if keys is None:
+            assert json.loads(isolated_display_settings.read_text()) == {
+                "font_size": 40, "rotation": 90,
+            }
+            return [pygame.event.Event(pygame.QUIT)]
+        for event, key in keys:
+            held[key] = event == down
+        return [pygame.event.Event(event, key=key) for event, key in keys]
+
+    def capture(state, renderer, notice, *, view_page=0):
+        frames.append((state.view, state.font_size, renderer.screen.get_size()))
+        return draw(state, renderer, notice, view_page=view_page)
+
+    monkeypatch.setattr(pygame.event, "get", events)
+    monkeypatch.setattr(pygame.key, "get_focused", lambda: True)
+    monkeypatch.setattr(pygame.key, "get_pressed", lambda: held)
+    monkeypatch.setattr(app, "monotonic_ns", lambda: now_ms * 1_000_000)
+    monkeypatch.setattr(app, "_draw", capture)
+    config = Config(
+        display=DisplayConfig(window_width=640, window_height=360),
+        songs=SongsConfig(directory=str(tmp_path)),
+    )
+    run(config)
+    run(config)
+
+    assert frames == [
+        (View.SONG_VIEW, 32, (640, 360)),
+        (View.MAIN_MENU, 32, (640, 360)),
+        (View.MAIN_MENU, 36, (640, 360)),
+        (View.MAIN_MENU, 40, (640, 360)),
+        (View.MAIN_MENU, 40, (360, 640)),
+        (View.SONG_LIST, 40, (360, 640)),
+        (View.MAIN_MENU, 40, (360, 640)),
+        (View.SONG_VIEW, 40, (360, 640)),
+        (View.SONG_VIEW, 40, (360, 640)),
+    ]
+
+
+def test_song_draws_resizes_logs_navigation_and_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "01_Erster.txt").write_text("Erster Songtext", encoding="utf-8")
+    (tmp_path / "02_Zweiter.txt").write_text("Zweiter Songtext", encoding="utf-8")
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     monkeypatch.setattr(app, "platform", "win32")
     batches = iter(
@@ -80,7 +169,7 @@ def test_song_draws_resizes_logs_navigation_and_exits(
 
     monkeypatch.setattr(pygame.event, "get", get_events)
     with caplog.at_level(logging.DEBUG, logger="lyricspi.app"):
-        run(Config())
+        run(Config(songs=SongsConfig(directory=str(tmp_path))))
 
     original, larger, second, restored = screens
     assert original.get_size() == (1280, 720)
@@ -204,10 +293,10 @@ def test_app_loads_setlist_once_and_draws_startup_notice(
     load.assert_called_once_with(config.songs)
     draw.assert_called_once()
     if issue:
-        assert draw.call_args.args[1:] == (48, (), issue.value)
+        assert draw.call_args.args[1:] == (32, (), issue.value)
         assert draw.call_args.kwargs["song"] is None
     else:
-        assert draw.call_args.args[1:] == (48, ("Lied",), None)
+        assert draw.call_args.args[1:] == (32, ("Lied",), None)
         assert draw.call_args.kwargs["song"].title == "Demo"
         assert draw.call_args.kwargs["page_count"] == 1
     assert not pygame.display.get_init()
@@ -276,7 +365,7 @@ def test_page_layout_follows_font_and_window_changes(
 
     monkeypatch.setattr(Renderer, "draw", draw)
     monkeypatch.setattr(pygame.event, "get", get_events)
-    display = DisplayConfig(window_width=640, window_height=160, font_step=24)
+    display = DisplayConfig(window_width=640, window_height=160, font_size=36)
     run(Config(
         display=display,
         songs=SongsConfig(directory=str(tmp_path)),
@@ -290,10 +379,10 @@ def test_page_layout_follows_font_and_window_changes(
     assert start[1][0] == first_lines[0]
     assert second[1][0] == first_lines[len(start[1])]
     assert end[1][-1] == smaller[1][-1] == first_lines[-1]
-    assert smaller[0] == 24
-    assert expanded == recovered == wrapped == (24, first_lines, None)
-    assert tiny == (24, (), app.SMALL_WINDOW_NOTICE)
-    assert next_song == back == (24, ("Zweiter Text",), None)
+    assert smaller[0] == 32
+    assert expanded == recovered == wrapped == (32, first_lines, None)
+    assert tiny == (32, (), app.SMALL_WINDOW_NOTICE)
+    assert next_song == back == (32, ("Zweiter Text",), None)
     assert positions[0][0] == 0
     assert positions[1][0] == 1
     assert positions[3][0] == positions[3][1] - 1
@@ -388,7 +477,7 @@ def test_controller_menu_restores_text_position_and_selects_songs(
         (200, [(down, a)]),
         (5200, []),
         (5300, [(up, a), *tap(a)]),
-        (5350, [*tap(b), *tap(b)]),
+        (5350, tap(b)),
         (5400, [*tap(c), *tap(b)]),
         (5500, tap(d)),
         (5600, tap(d)),
@@ -401,7 +490,6 @@ def test_controller_menu_restores_text_position_and_selects_songs(
     pressed: dict[int, bool] = {}
     now_ms = 0
     frames = []
-    menu_font_heights: list[int] = []
     draw = app._draw
 
     def events() -> list[pygame.event.Event]:
@@ -424,12 +512,10 @@ def test_controller_menu_restores_text_position_and_selects_songs(
             frame_patch.setattr(renderer, "_font_for_size", font)
             page_count = draw(state, renderer, notice, view_page=view_page)
         font.assert_called_once_with(state.font_size)
-        if state.view is View.MAIN_MENU:
-            menu_font_heights.append(font(state.font_size).get_height())
         assert state.song is not None
         frames.append((
             state.view, state.song.title, state.navigation.page_index,
-            state.page, state.font_size, state.selected_song,
+            state.page, state.font_size, state.selected_song, state.rotation,
         ))
         return page_count
 
@@ -444,26 +530,27 @@ def test_controller_menu_restores_text_position_and_selects_songs(
     ))
 
     (
-        initial, second_page, main, smaller, resized, song_list, back, resumed,
+        initial, second_page, main, larger, rotated, song_list, back, resumed,
         reopened, selected, new_song,
     ) = frames
     assert initial[0:3] == (View.SONG_VIEW, "Erster", 0)
     assert second_page[0:3] == (View.SONG_VIEW, "Erster", 1)
     assert main[1:5] == second_page[1:5]
     assert all(
-        frame[0] is View.MAIN_MENU for frame in (main, smaller, resized, back, reopened)
+        frame[0] is View.MAIN_MENU for frame in (main, larger, rotated, back, reopened)
     )
-    assert (main[4], smaller[4], resized[4]) == (48, 44, 52)
-    assert menu_font_heights[1] < menu_font_heights[0] < menu_font_heights[2]
+    assert (main[4], larger[4], rotated[4]) == (32, 36, 36)
+    assert (main[6], larger[6], rotated[6]) == (0, 0, 90)
     assert song_list[0] is selected[0] is View.SONG_LIST
-    assert song_list[-1] == selected[-1] == 1
-    assert song_list[1:5] == back[1:5] == resized[1:5]
+    assert song_list[5] == selected[5] == 1
+    assert song_list[1:5] == back[1:5] == rotated[1:5]
+    assert all(frame[6] == 90 for frame in (song_list, back, resumed, new_song))
     assert resumed[0:2] == (View.SONG_VIEW, "Erster")
     assert second_page[3][0] in resumed[3]
-    assert new_song[0:5] == (View.SONG_VIEW, "Zweiter", 0, ("Zweiter Song",), 52)
+    assert new_song[0:5] == (View.SONG_VIEW, "Zweiter", 0, ("Zweiter Song",), 36)
 
 
-def test_large_menu_advances_pages_and_keeps_direct_controls(
+def test_small_menu_stays_on_one_page_and_keeps_direct_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
@@ -506,30 +593,29 @@ def test_large_menu_advances_pages_and_keeps_direct_controls(
     monkeypatch.setattr(pygame.key, "get_focused", lambda: True)
     monkeypatch.setattr(pygame.key, "get_pressed", lambda: pressed)
     run(Config(display=DisplayConfig(
-        window_width=400, window_height=260, font_size=96,
+        window_width=400, window_height=260, font_size=48,
     )))
 
     assert shown == [
-        (View.SONG_VIEW, 0), (View.MAIN_MENU, 0), (View.MAIN_MENU, 1),
+        (View.SONG_VIEW, 0), (View.MAIN_MENU, 0),
         (View.SONG_LIST, 0), (View.MAIN_MENU, 0), (View.SONG_VIEW, 0),
     ]
 
 
 def test_empty_song_list_can_be_aborted() -> None:
     state = AppState(48, development_mode=True)
-    display = DisplayConfig()
     for action in (
         Action.OPEN_MENU, Action.OPEN_SONG_LIST, Action.SELECT_NEXT,
         Action.SELECT_PREVIOUS, Action.OPEN_SELECTED_SONG,
     ):
-        state.apply_action(action, display)
+        state.apply_action(action)
 
     assert state.view is View.SONG_LIST
     assert state.song is None
     assert state.selected_song == 0
-    state.apply_action(Action.BACK, display)
+    state.apply_action(Action.BACK)
     assert state.view is View.MAIN_MENU
-    state.apply_action(Action.BACK, display)
+    state.apply_action(Action.BACK)
     assert state.view is View.SONG_VIEW
 
 
@@ -646,7 +732,7 @@ def test_splash_transitions_to_song_and_processes_input(
     else:
         assert b"\xff\xff\xff" in pixel_data
     assert pygame.image.tostring(frames[1], "RGB") == pixel_data
-    assert pages == [(52, ("Erster Songtext",))]
+    assert pages == [(36, ("Erster Songtext",))]
 
 
 def test_missing_display_cleans_up(
