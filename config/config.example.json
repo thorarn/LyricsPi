@@ -30,5 +30,24 @@
   "input": {
     "shutdown_key": "down",
     "shutdown_hold_ms": 15000
+  },
+  "lyrics_following": {
+    "enabled": false,
+    "mode": "observe",
+    "audio_source": "windows_loopback",
+    "audio_device": "default",
+    "language": "de",
+    "model": "small",
+    "beam_size": 5,
+    "window_seconds": 6,
+    "overlap_seconds": 2,
+    "use_initial_prompt": false,
+    "hotwords": "",
+    "confidence_threshold": 0.75,
+    "pause_duration_ms": 800,
+    "prefer_pause": true,
+    "min_turn_interval_ms": 5000,
+    "highlight_current_line": true,
+    "auto_page_turn": false
   }
 }

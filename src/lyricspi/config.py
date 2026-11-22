@@ -72,15 +72,71 @@ class InputConfig:
 
 
 @dataclass(frozen=True)
+class LyricsFollowingConfig:
+    enabled: bool = False
+    mode: str = "observe"
+    audio_source: str = "windows_loopback"
+    audio_device: str = "default"
+    language: str = "de"
+    model: str = "small"
+    beam_size: int = 5
+    window_seconds: int = 6
+    overlap_seconds: int = 2
+    use_initial_prompt: bool = False
+    hotwords: str = ""
+    confidence_threshold: float = 0.75
+    pause_duration_ms: int = 800
+    prefer_pause: bool = True
+    min_turn_interval_ms: int = 5000
+    highlight_current_line: bool = True
+    auto_page_turn: bool = False
+
+    def __post_init__(self) -> None:
+        choices = {
+            "mode": ("observe", "auto"),
+            "audio_source": ("windows_loopback",),
+            "language": ("de", "en"),
+        }
+        for key, allowed in choices.items():
+            if getattr(self, key) not in allowed:
+                raise ConfigError(
+                    f"lyrics_following.{key} muss einen dieser Werte haben "
+                    f"({', '.join(allowed)})."
+                )
+        for key in ("audio_device", "model"):
+            value = getattr(self, key)
+            if not value.strip() or "\x00" in value:
+                raise ConfigError(
+                    f"lyrics_following.{key} benötigt einen gültigen Namen."
+                )
+        if not 0 < self.confidence_threshold <= 1:
+            raise ConfigError(
+                "lyrics_following.confidence_threshold muss in (0, 1] liegen."
+            )
+        for key in ("beam_size", "pause_duration_ms", "min_turn_interval_ms"):
+            if getattr(self, key) < 1:
+                raise ConfigError(f"lyrics_following.{key} muss größer als 0 sein.")
+        if not 2 <= self.window_seconds <= 15:
+            raise ConfigError("lyrics_following.window_seconds muss zwischen 2 und 15 liegen.")
+        if not 0 <= self.overlap_seconds < self.window_seconds:
+            raise ConfigError(
+                "lyrics_following.overlap_seconds muss kleiner als das Fenster "
+                "und mindestens 0 sein."
+            )
+
+
+@dataclass(frozen=True)
 class Config:
     display: DisplayConfig = DisplayConfig()
     system: SystemConfig = SystemConfig()
     songs: SongsConfig = SongsConfig()
     input: InputConfig = InputConfig()
+    lyrics_following: LyricsFollowingConfig = LyricsFollowingConfig()
 
 
 Section = TypeVar(
-    "Section", DisplayConfig, SystemConfig, SongsConfig, InputConfig
+    "Section", DisplayConfig, SystemConfig, SongsConfig, InputConfig,
+    LyricsFollowingConfig,
 )
 
 
@@ -89,12 +145,16 @@ def _load_section(name: str, values: object, defaults: Section) -> Section:
         raise ConfigError(f"{name} muss ein JSON-Objekt sein.")
 
     settings = asdict(defaults)
-    type_names = {bool: "ein Wahrheitswert", int: "eine Ganzzahl", str: "Text"}
+    type_names = {
+        bool: "ein Wahrheitswert", int: "eine Ganzzahl", str: "Text",
+        float: "eine Zahl",
+    }
     for key, value in values.items():
         if key not in settings:
             raise ConfigError(f"Unbekannte Einstellung {name}.{key}.")
         expected_type = type(settings[key])
-        if type(value) is not expected_type:
+        allowed_types = (int, float) if expected_type is float else (expected_type,)
+        if type(value) not in allowed_types:
             raise ConfigError(
                 f"{name}.{key} muss {type_names[expected_type]} sein."
             )
@@ -173,7 +233,7 @@ def load_config(path: Path | None = None) -> Config:
     if not isinstance(data, dict):
         raise ConfigError("Die Konfiguration muss ein JSON-Objekt sein.")
     for section in data:
-        if section not in ("display", "system", "songs", "input"):
+        if section not in ("display", "system", "songs", "input", "lyrics_following"):
             raise ConfigError(f"Unbekannter Abschnitt {section}.")
 
     display = _load_section(
@@ -182,8 +242,14 @@ def load_config(path: Path | None = None) -> Config:
     system = _load_section("system", data.get("system", {}), SystemConfig())
     songs = _load_section("songs", data.get("songs", {}), SongsConfig())
     keyboard = _load_section("input", data.get("input", {}), InputConfig())
+    following = _load_section(
+        "lyrics_following", data.get("lyrics_following", {}), LyricsFollowingConfig()
+    )
     _validate_display(display)
     _validate_songs(songs)
     if system.splash_duration_ms < 1:
         raise ConfigError("system.splash_duration_ms muss größer als 0 sein.")
-    return Config(display=display, system=system, songs=songs, input=keyboard)
+    return Config(
+        display=display, system=system, songs=songs, input=keyboard,
+        lyrics_following=following,
+    )

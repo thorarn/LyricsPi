@@ -6,7 +6,7 @@ import pygame
 import pytest
 
 from lyricspi.app import run
-from lyricspi.config import Config, DisplayConfig, PROJECT_ROOT, SongsConfig
+from lyricspi.config import Config, DisplayConfig, SongsConfig
 from lyricspi.layout import Page
 from lyricspi.renderer import Renderer, TRACK_COLOR, progress_position
 from lyricspi.setlist import Setlist, Song
@@ -132,10 +132,13 @@ def test_song_list_rewraps_long_title_with_the_global_font(
     assert "".join(" ".join(rows).split()) == "".join(f"01{title}".split())
 
 
-def test_demo_songs_have_distinct_lengths_and_fill_multiple_pages(
-    renderer: Renderer,
+def test_songs_with_section_markers_fill_multiple_pages(
+    renderer: Renderer, tmp_path: Path,
 ) -> None:
-    songs = load_songs(PROJECT_ROOT / "demo_songs").setlist
+    for number in range(1, 6):
+        lines = ("[Strophe 1]", *["Eine Textzeile"] * (30 + number), "[Refrain]", "[Solo]")
+        (tmp_path / f"{number}_Demo.txt").write_text("\n".join(lines), encoding="utf-8")
+    songs = load_songs(tmp_path).setlist
     assert len(songs) == 5
     lengths = {len(song.content.splitlines()) for song in songs}
     assert min(lengths) >= 30
@@ -176,7 +179,9 @@ def test_page_layout_reserves_header_and_progress_gutter(
     paginate = Mock(wraps=renderer._paginate)
     monkeypatch.setattr(renderer, "_paginate", paginate)
     renderer.layout("Text", 48)
-    paginate.assert_called_once_with("Text", 48, lyrics, page_starts=None)
+    paginate.assert_called_once_with(
+        "Text", 48, lyrics, page_starts=None, page_line_ids=None,
+    )
 
 
 @pytest.mark.parametrize(

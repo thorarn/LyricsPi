@@ -15,6 +15,7 @@ from .setlist import Setlist, Song
 LOGGER = logging.getLogger(__name__)
 FONT_NAMES = ("Consolas", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 TRACK_COLOR = pygame.Color("#555555")
+LYRIC_HIGHLIGHT = pygame.Color("#383838")
 MENU_OPTIONS = (
     "A  Schrift kleiner",
     "B  Schrift größer",
@@ -104,9 +105,13 @@ class Renderer:
     def layout(
         self, content: str, font_size: int, *, song: Song | None = None,
         page_starts: list[TextPosition] | None = None,
+        page_line_ids: list[tuple[int, ...]] | None = None,
     ) -> tuple[Page, ...]:
         _, _, lyrics = self._song_areas(self._font_for_size(font_size), song)
-        return self._paginate(content, font_size, lyrics, page_starts=page_starts)
+        return self._paginate(
+            content, font_size, lyrics, page_starts=page_starts,
+            page_line_ids=page_line_ids,
+        )
 
     def _song_areas(
         self, font: pygame.font.Font, song: Song | None = None
@@ -136,6 +141,7 @@ class Renderer:
     def _paginate(
         self, content: str, font_size: int, area: pygame.Rect, *,
         page_starts: list[TextPosition] | None = None,
+        page_line_ids: list[tuple[int, ...]] | None = None,
     ) -> tuple[Page, ...]:
         font = self._font_for_size(font_size)
         return paginate(
@@ -146,6 +152,7 @@ class Renderer:
             font.get_height(),
             self.line_spacing,
             page_starts=page_starts,
+            page_line_ids=page_line_ids,
         )
 
     def _fitting_pages(
@@ -281,6 +288,7 @@ class Renderer:
         song: Song | None = None,
         page_index: int = 0,
         page_count: int = 1,
+        highlighted_rows: tuple[int, ...] = (),
     ) -> None:
         self.screen.fill(self.background)
         area = self._content_area()
@@ -290,7 +298,7 @@ class Renderer:
             if song is not None:
                 self._draw_header(song, font, header)
                 self._draw_progress(rail, page_index, page_count)
-            self._draw_lines(page, font, lyrics)
+            self._draw_lines(page, font, lyrics, highlighted_rows=highlighted_rows)
         elif area.width > 0 and area.height > 0:
             font = self._font_for_size(font_size)
             pages = self._fitting_pages(notice, font, area)
@@ -340,14 +348,19 @@ class Renderer:
     def _draw_lines(
         self, page: Page, font: pygame.font.Font, area: pygame.Rect, *,
         color: pygame.Color | str | None = None,
+        highlighted_rows: tuple[int, ...] = (),
     ) -> None:
         if color is None:
             color = self.foreground
         y = area.top
-        for line in page:
+        for index, line in enumerate(page):
             height = font.get_height()
             if line.strip():
-                text = font.render(line, True, color)
-                self.screen.blit(text, (area.left, y))
+                highlighted = index in highlighted_rows
+                text = font.render(line, True, "white" if highlighted else color)
                 height = max(height, text.get_height())
+                if highlighted:
+                    bounds = pygame.Rect(area.left, y, area.width, height)
+                    self.screen.fill(LYRIC_HIGHLIGHT, bounds)
+                self.screen.blit(text, (area.left, y))
             y += height + self.line_spacing

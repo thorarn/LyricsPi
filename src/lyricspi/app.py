@@ -2,9 +2,10 @@
 
 import logging
 from bisect import bisect_right
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from sys import platform
-from time import monotonic_ns
+from time import monotonic, monotonic_ns
+from typing import TYPE_CHECKING
 
 import pygame
 
@@ -18,6 +19,9 @@ from .setlist import Setlist, Song
 from .shutdown import request_shutdown
 from .song_loader import load_setlist
 
+if TYPE_CHECKING:
+    from .config import LyricsFollowingConfig
+    from .lyrics_follower import LyricsFollower
 
 LOGGER = logging.getLogger(__name__)
 FRAMES_PER_SECOND = 30
@@ -38,6 +42,8 @@ class AppState:
     text_position: TextPosition = (0, 0)
     view: View = View.SONG_VIEW
     selected_song: int = 0
+    follower: "LyricsFollower | None" = None
+    page_line_ids: list[tuple[int, ...]] = field(default_factory=list)
 
     @property
     def song(self) -> Song | None:
@@ -109,10 +115,14 @@ def _update_layout(state: AppState, renderer: Renderer) -> None:
     if song is None:
         return
     state.page_starts.clear()
+    state.page_line_ids.clear()
+    if state.follower is not None:
+        state.follower.layout_changed()
     try:
         state.pages = renderer.layout(
             song.content, state.font_size,
             song=song, page_starts=state.page_starts,
+            page_line_ids=state.page_line_ids if state.follower is not None else None,
         )
     except LayoutTooSmall:
         state.pages = ()
@@ -147,6 +157,16 @@ def _draw(
         LOGGER.debug(
             "Seite %d/%d", state.navigation.page_index + 1, len(state.pages)
         )
+    highlighted_rows = ()
+    if (
+        state.follower is not None and state.follower.config.highlight_current_line
+        and state.page_line_ids
+    ):
+        line_ids = state.page_line_ids[state.navigation.page_index]
+        highlighted_rows = tuple(
+            row for row, line_id in enumerate(line_ids)
+            if line_id == state.follower.line_id
+        )
     renderer.draw(
         state.font_size,
         state.page,
@@ -154,7 +174,10 @@ def _draw(
         song=state.song,
         page_index=state.navigation.page_index,
         page_count=len(state.pages),
+        highlighted_rows=highlighted_rows,
     )
+    if highlighted_rows and state.follower is not None:
+        state.follower.mark_visible()
     return 1
 
 
@@ -186,12 +209,53 @@ def _apply_keyboard_action(
         LOGGER.debug("Songwechsel: %s", current_song.filename)
     if song_changed or font_size != state.font_size:
         _update_layout(state, renderer)
-        return True
-    return (
-        page_index != state.navigation.page_index
-        or view is not state.view
-        or selection != state.selected_song
+    navigated = (
+        song_changed or view is not state.view
+        or (font_size == state.font_size and page_index != state.navigation.page_index)
     )
+    reset_song = state.view is View.SONG_VIEW and (
+        action in (Action.PREVIOUS_SONG, Action.NEXT_SONG, Action.OPEN_SELECTED_SONG)
+    )
+    if state.follower is not None and (navigated or reset_song):
+        _sync_follower(state, manual=True)
+        return True
+    return navigated or font_size != state.font_size or selection != state.selected_song
+
+
+def _sync_follower(state: AppState, *, manual: bool = False) -> None:
+    if state.follower is None:
+        return
+    song = state.song if state.view is View.SONG_VIEW else None
+    state.follower.synchronize(
+        song.content if song is not None else None,
+        state.page_starts[state.navigation.page_index][0] if state.page_starts else 0,
+        monotonic(), manual=manual,
+    )
+
+
+def _start_follower(
+    state: AppState, renderer: Renderer, config: "LyricsFollowingConfig",
+) -> None:
+    from .lyrics_follower import LyricsFollower
+
+    state.follower = LyricsFollower(config)
+    _update_layout(state, renderer)
+    _sync_follower(state)
+    state.follower.start()
+    LOGGER.info("Textverfolgung aktiv (%s).", config.mode)
+
+
+def _poll_follower(state: AppState) -> bool:
+    follower = state.follower
+    if follower is None or state.view is not View.SONG_VIEW:
+        return False
+    previous_line = follower.line_id
+    page = follower.poll(state.navigation.page_index, state.page_line_ids, monotonic())
+    if page is not None:
+        state.navigation.page_index = page
+        state.text_position = state.page_starts[page]
+        return True
+    return previous_line != follower.line_id and follower.config.highlight_current_line
 
 
 def run(config: Config) -> None:
@@ -211,6 +275,9 @@ def run(config: Config) -> None:
     keyboard = (
         KeyboardController(config.input) if config.system.allow_keyboard else None
     )
+    following_config = config.lyrics_following
+    following_supported = platform == "win32" and state.development_mode
+    retiring_follower = None
 
     try:
         renderer = Renderer(config.display, resizable=state.development_mode)
@@ -222,6 +289,8 @@ def run(config: Config) -> None:
         clock = pygame.time.Clock()
         size = renderer.screen.get_size()
         _update_layout(state, renderer)
+        if following_supported and following_config.enabled:
+            _start_follower(state, renderer, following_config)
         splash_until = None
         logo = None
         view_page = 0
@@ -255,6 +324,36 @@ def run(config: Config) -> None:
                     break
                 elif event.type == pygame.WINDOWEXPOSED:
                     redraw = True
+                elif (
+                    following_supported and keyboard is not None
+                    and event.type == pygame.KEYDOWN
+                    and event.key in (pygame.K_F8, pygame.K_F9)
+                ):
+                    if event.key == pygame.K_F8:
+                        if state.follower is not None:
+                            retiring_follower = state.follower
+                            retiring_follower.stop()
+                            state.follower = None
+                            state.page_line_ids.clear()
+                            LOGGER.info("Textverfolgung deaktiviert.")
+                        elif retiring_follower is None or retiring_follower.finished:
+                            retiring_follower = None
+                            _start_follower(state, renderer, following_config)
+                        else:
+                            LOGGER.info("Die vorige Textverfolgung wird noch beendet.")
+                        redraw = True
+                    elif state.follower is not None:
+                        auto = not (
+                            following_config.mode == "auto"
+                            and following_config.auto_page_turn
+                        )
+                        following_config = replace(
+                            following_config, mode="auto" if auto else "observe",
+                            auto_page_turn=auto,
+                        )
+                        state.follower.config = following_config
+                        state.follower.layout_changed()
+                        LOGGER.info("Textverfolgung: %s.", following_config.mode)
                 elif keyboard is not None:
                     for action in keyboard.handle_event(event, now_ms, state.view):
                         view = state.view
@@ -284,6 +383,7 @@ def run(config: Config) -> None:
                         break
 
             if state.running:
+                redraw |= _poll_follower(state)
                 if splash_until is not None and (
                     now_ms >= splash_until or state.view is not View.SONG_VIEW
                 ):
@@ -312,5 +412,9 @@ def run(config: Config) -> None:
         raise RuntimeError("Fehler bei der Bildschirmausgabe.") from error
     finally:
         pygame.quit()
+        if state.follower is not None:
+            state.follower.close()
+        if retiring_follower is not None:
+            retiring_follower.close()
     if state.last_action is Action.SHUTDOWN:
         request_shutdown()

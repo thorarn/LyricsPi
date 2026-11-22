@@ -63,6 +63,7 @@ def paginate(
     line_spacing: int,
     *,
     page_starts: list[TextPosition] | None = None,
+    page_line_ids: list[tuple[int, ...]] | None = None,
 ) -> tuple[Page, ...]:
     """Fill each page with consecutive complete rows."""
     if width < 1 or height < line_height:
@@ -74,6 +75,8 @@ def paginate(
     page: list[str] = []
     used = 0
     starts: list[TextPosition] = []
+    line_ids: list[int] = []
+    id_pages: list[tuple[int, ...]] = []
     for line_number, line in enumerate(content.splitlines()):
         # Tabs use four-column stops. SDL_ttf cannot render embedded NULs.
         display_line = line.expandtabs(4).replace("\x00", "\ufffd")
@@ -87,17 +90,26 @@ def paginate(
             if used + cost > available:
                 pages.append(tuple(page))
                 page.clear()
+                if page_line_ids is not None:
+                    id_pages.append(tuple(line_ids))
+                    line_ids.clear()
                 used = 0
             if not page and page_starts is not None:
                 starts.append((line_number, column))
             page.append(row)
+            if page_line_ids is not None:
+                line_ids.append(line_number)
             used += cost
 
     if page:
         pages.append(tuple(page))
+        if page_line_ids is not None:
+            id_pages.append(tuple(line_ids))
     # Keep blank rows inside the song, including across a page boundary.
     while pages and not any(row.strip() for row in pages[-1]):
         pages.pop()
     if page_starts is not None:
         page_starts[:] = starts[:len(pages)]
+    if page_line_ids is not None:
+        page_line_ids[:] = id_pages[:len(pages)]
     return tuple(pages)
