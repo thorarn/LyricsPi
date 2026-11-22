@@ -9,7 +9,7 @@ from lyricspi import Action, app
 from lyricspi.app import AppState, run
 from lyricspi.config import Config, DisplayConfig, SongsConfig
 from lyricspi.layout import Page
-from lyricspi.renderer import Renderer, TRACK_COLOR, scroll_thumb
+from lyricspi.renderer import Renderer, TRACK_COLOR, scroll_thumb, truncate_song_list_line
 from lyricspi.setlist import Setlist, Song
 from lyricspi.song_loader import load_songs
 
@@ -142,34 +142,109 @@ def test_empty_song_list_shows_notice_with_global_font(
     assert draw_block.call_args.args[1] is renderer._font_for_size(48)
 
 
-def test_song_list_rewraps_long_title_with_the_global_font(
-    renderer: Renderer, monkeypatch: pytest.MonkeyPatch,
+def test_single_line_truncation_uses_font_width(renderer: Renderer) -> None:
+    font = pygame.font.Font(None, 40)
+    assert truncate_song_list_line("Kurzer Titel", font, 400) == "Kurzer Titel"
+
+    text = "WWiiiiiiii"
+    width = font.size("WWiii")[0]
+    assert truncate_song_list_line(text, font, width, ellipsis=False) == "WWiii"
+    width = font.size("WWiii…")[0]
+    assert truncate_song_list_line(text + "WWWW", font, width) == "WWiii…"
+    assert truncate_song_list_line("Mehr\r\nals\u2028eine\tZeile", font, 400) == (
+        "Mehr  als eine Zeile"
+    )
+
+
+def test_very_long_song_title_only_measures_short_prefixes(renderer: Renderer) -> None:
+    font = Mock(wraps=renderer._font_for_size(64))
+    title = "01  " + "W" * 100_000
+    shortened = truncate_song_list_line(title, font, 400)
+    assert shortened.startswith("01  ") and shortened.endswith("…")
+    assert font.size(shortened)[0] <= 400
+    assert max(len(measure.args[0]) for measure in font.size.call_args_list) < 64
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 270])
+def test_song_list_truncates_titles_with_the_global_font(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch, rotation: int,
 ) -> None:
-    pygame.display.set_mode((480, 260))
-    title = "Ein besonders langer Titel mit vielen gut lesbaren Wörtern"
+    display = pygame.display.set_mode((480, 260))
+    renderer.rotation = rotation
+    title = "Ein besonders langer Titel\nmit vielen gut lesbaren Wörtern"
     songs = Setlist((Song(1, "01_Lied.txt", Path(), title, "Text"),))
+    draw = renderer._draw_menu_block
+    draw_block = Mock()
+
+    def capture(page, font, area, *, selected=False):
+        draw_block(page, font, area.copy(), selected=selected)
+        draw(page, font, area, selected=selected)
+
+    monkeypatch.setattr(renderer, "_draw_menu_block", capture)
+
+    displayed = []
+    for size in (28, 64):
+        draw_block.reset_mock()
+        assert renderer.draw_song_list(songs, 0, size) == 1
+        selected = [call for call in draw_block.call_args_list if call.kwargs.get("selected")]
+        assert len(selected) == 1
+        page, font, area = selected[0].args
+        assert font is renderer._font_for_size(size)
+        assert len(page) == 1
+        text = page[0]
+        assert text.startswith("01  ")
+        assert text.endswith("…")
+        assert text.splitlines() == [text]
+        assert font.size(text)[0] <= area.width
+        assert renderer._page_height(page, font) <= area.height
+        assert renderer.screen.get_at((area.right - 1, area.top)) == pygame.Color("white")
+        rotated = pygame.transform.rotate(renderer.screen, -rotation)
+        assert pygame.image.tostring(display, "RGB") == pygame.image.tostring(rotated, "RGB")
+        displayed.append(text)
+    assert len(displayed[0]) > len(displayed[1])
+    assert songs[0].title == title
+
+
+@pytest.mark.parametrize("digits", ["001", "0", ""])
+def test_song_list_keeps_the_number_visible_on_narrow_screens(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch, digits: str,
+) -> None:
+    font = renderer._font_for_size(28)
+    renderer.margin_percent = 0
+    pygame.display.set_mode((font.size(digits)[0] if digits else 1, 140))
+    songs = Setlist((Song(1, "001_Lied.txt", Path(), "Sehr langer Titel", ""),))
     draw_block = Mock(wraps=renderer._draw_menu_block)
     monkeypatch.setattr(renderer, "_draw_menu_block", draw_block)
 
-    assert renderer.draw_song_list(songs, 0, 24) == 1
-    small_rows = draw_block.call_args.args[0]
-    assert draw_block.call_args.args[1] is renderer._font_for_size(24)
-    draw_block.reset_mock()
+    assert renderer.draw_song_list(songs, 0, 28) == 1
+    assert draw_block.call_args.args[0] == (digits,)
+    assert draw_block.call_args.kwargs["selected"]
+    assert renderer.screen.get_at((0, 0)) == pygame.Color("white")
 
-    count = renderer.draw_song_list(songs, 0, 96)
-    assert count > 1
-    for page_index in range(1, count):
-        renderer.draw_song_list(songs, 0, 96, page_index)
-    rows = []
-    for args, kwargs in draw_block.call_args_list:
-        page, font, area = args
-        assert kwargs["selected"]
-        assert font is renderer._font_for_size(96)
-        assert renderer._page_height(page, font) <= area.height
-        assert all(font.size(line)[0] <= area.width for line in page)
-        rows.extend(page)
-    assert len(rows) > len(small_rows)
-    assert "".join(" ".join(rows).split()) == "".join(f"01{title}".split())
+
+def test_song_list_scrolls_past_long_unselected_titles(
+    renderer: Renderer, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pygame.display.set_mode((360, 180))
+    songs = Setlist(tuple(
+        Song(number, f"{number:02}_Lied.txt", Path(), "Langer Titel " * 40, "")
+        for number in range(30)
+    ))
+    draw_block = Mock(wraps=renderer._draw_menu_block)
+    monkeypatch.setattr(renderer, "_draw_menu_block", draw_block)
+
+    for selected in (0, 8, 16, 29):
+        draw_block.reset_mock()
+        renderer.draw_song_list(songs, selected, 32)
+        rows = [
+            (int(page[0].split()[0]), kwargs["selected"])
+            for (page, _, _), kwargs in draw_block.call_args_list
+            if kwargs
+        ]
+        numbers = [number for number, _ in rows]
+        assert len(numbers) > 1
+        assert numbers == list(range(numbers[0], numbers[-1] + 1))
+        assert [number for number, highlighted in rows if highlighted] == [selected]
 
 
 def test_song_fixtures_have_distinct_lengths_and_fill_multiple_pages(

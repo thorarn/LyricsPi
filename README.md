@@ -78,9 +78,9 @@ auf einer Seite. Bei wenig Platz werden die Beschriftungen gekürzt. Falls
 vier Zeilen mit der eingestellten Schriftgröße nicht passen, erscheint
 der Hinweis „Fenster zu klein“.
 Die Songliste zeigt Nummer und Titel in numerischer Reihenfolge und markiert
-die Auswahl. Lange Einträge werden umgebrochen. Wenn ein markierter Titel
-mehrere Bildschirmseiten braucht, wechselt die Anzeige automatisch weiter.
-Die Tasten bleiben dabei direkt bedienbar.
+die Auswahl. Pro Song ist eine Zeile vorgesehen. Lange Titel werden je nach
+verfügbarer Breite mit einem Auslassungszeichen gekürzt. Beim Wechsel der
+Auswahl bewegt sich der sichtbare Ausschnitt vertikal mit.
 Mit D aus der Songliste und erneut D im Hauptmenü kehrst du zur bisherigen
 Textstelle zurück. Escape beendet LyricsPi im Windows-Entwicklungsmodus.
 

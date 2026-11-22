@@ -16,6 +16,10 @@ LOGGER = logging.getLogger(__name__)
 FONT_NAMES = ("Consolas", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 TRACK_COLOR = pygame.Color("#555555")
 MIN_THUMB_HEIGHT = 2
+SINGLE_LINE_TRANSLATION = str.maketrans(
+    {char: " " for char in "\t\r\n\v\f\x1c\x1d\x1e\x85\u2028\u2029"}
+    | {"\x00": "\ufffd"}
+)
 
 
 def scroll_thumb(
@@ -38,6 +42,31 @@ def scroll_thumb(
         end = round(track.height * (start_line + visible_lines) / total_lines)
         height = end - offset
     return pygame.Rect(track.left, track.top + offset, track.width, height)
+
+
+def truncate_song_list_line(
+    text: str, font: pygame.font.Font, width: int, *, ellipsis: bool = True,
+) -> str:
+    """Fit a single line without measuring the full text of oversized titles."""
+    if width <= 0:
+        return ""
+    text = text.translate(SINGLE_LINE_TRANSLATION)
+    low, high = 0, min(1, len(text))
+    while font.size(text[:high])[0] <= width:
+        if high == len(text):
+            return text
+        low, high = high, min(2 * high, len(text))
+
+    suffix = "…" if ellipsis and font.size("…")[0] <= width else ""
+    if suffix:
+        low = 0
+    while high - low > 1:
+        middle = (low + high) // 2
+        if font.size(text[:middle] + suffix)[0] <= width:
+            low = middle
+        else:
+            high = middle
+    return text[:low].rstrip() + suffix
 
 
 class Renderer:
@@ -255,19 +284,19 @@ class Renderer:
                 pages = self._fitting_pages(empty, font, area)
             return self._draw_menu_pages(pages, page_index, font, area)
 
-        def song_pages(index: int) -> tuple[Page, ...]:
+        def song_row(index: int) -> Page:
             song = setlist[index]
-            return self._fitting_pages(
-                f"{song.display_number}  {song.title}", font, area
+            prefix = f"{song.display_number}  "
+            line = truncate_song_list_line(
+                prefix + song.title, font, area.width,
+                ellipsis=font.size(prefix + "…")[0] <= area.width,
             )
+            return (line,)
 
-        current = song_pages(selected)
-        if len(current) != 1:
-            return self._draw_menu_pages(
-                current, page_index, font, area, selected=True
-            )
-
-        current_height = self._page_height(current[0], font)
+        current = song_row(selected)
+        current_height = self._page_height(current, font)
+        if current_height > area.height:
+            return self._draw_menu_pages((), 0, font, area)
         heading = (title,)
         heading_height = self._page_height(heading, font) + self.line_spacing
         if (
@@ -288,16 +317,14 @@ class Renderer:
             for index in indices:
                 if remaining < font.get_height() + self.line_spacing:
                     break
-                pages = song_pages(index)
-                if len(pages) != 1:
-                    break
-                height = self._page_height(pages[0], font) + self.line_spacing
+                row = song_row(index)
+                height = self._page_height(row, font) + self.line_spacing
                 if height > remaining:
                     break
-                visible.append(pages[0])
+                visible.append(row)
                 remaining -= height
 
-        for index, page in enumerate((*reversed(above), current[0], *below)):
+        for index, page in enumerate((*reversed(above), current, *below)):
             self._draw_menu_block(page, font, area, selected=index == len(above))
             area.top += self._page_height(page, font) + self.line_spacing
         self._present()
